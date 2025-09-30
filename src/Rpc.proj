@@ -1,0 +1,43 @@
+<Project DefaultTargets="VSTest">
+    <Target Name="Restore">
+        <MSBuild Projects="Sigurn.Rpc.Generator/Sigurn.Rpc.Generator.csproj"
+                 Targets="Restore" />
+        <MSBuild Projects="Sigurn.Rpc/Sigurn.Rpc.csproj"
+                 Targets="Restore" />
+        <MSBuild Projects="Sigurn.Rpc.Tests/Sigurn.Rpc.Tests.csproj"
+                 Targets="Restore" />
+    </Target>
+
+    <Target Name="Build" DependsOnTargets="Restore">
+        <MSBuild Projects="Sigurn.Rpc.Generator/Sigurn.Rpc.Generator.csproj"
+                 Targets="Build" />
+        <MSBuild Projects="Sigurn.Rpc/Sigurn.Rpc.csproj"
+                 Targets="Build" />
+        <MSBuild Projects="Sigurn.Rpc.Tests/Sigurn.Rpc.Tests.csproj"
+                 Targets="Build" />
+
+        <MSBuild Projects="Sigurn.Rpc.IntegrationTests/Sigurn.Rpc.IntegrationTests.csproj"
+                 Targets="Restore" />
+        <MSBuild Projects="Sigurn.Rpc.IntegrationTests/Sigurn.Rpc.IntegrationTests.csproj"
+                 Targets="Build" />
+    </Target>
+
+    <Target Name="VSTest" DependsOnTargets="Build">
+        <MSBuild Projects="Sigurn.Rpc.Tests/Sigurn.Rpc.Tests.csproj"
+                 Targets="VSTest" />
+        <MSBuild Projects="Sigurn.Rpc.IntegrationTests/Sigurn.Rpc.IntegrationTests.csproj"
+                 Targets="VSTest" />
+    </Target>
+
+    <Target Name="Clean">
+        <MSBuild Projects="Sigurn.Rpc.IntegrationTests/Sigurn.Rpc.IntegrationTests.csproj"
+                 Targets="Clean" />
+        <MSBuild Projects="Sigurn.Rpc.Tests/Sigurn.Rpc.Tests.csproj"
+                 Targets="Clean" />
+        <MSBuild Projects="Sigurn.Rpc/Sigurn.Rpc.csproj"
+                 Targets="Clean" />
+        <MSBuild Projects="Sigurn.Rpc.Generator/Sigurn.Rpc.Generator.csproj"
+                 Targets="Clean" />
+    </Target>
+
+</Project>

@@ -1,0 +1,10 @@
+obj/
+bin/
+.vc/
+.DS_Store
+artifacts/
+nuget/
+
+# Verify
+*.received.*
+*.received/
