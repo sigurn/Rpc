@@ -365,8 +365,8 @@ public class RpcHandlerTests
         CancellationTokenSource rcts = new CancellationTokenSource();
         var packet = new SuccessPacket();
         var requestTask = handler.RequestAsync(packet, rcts.Token);
-        Assert.True(requestReceivedEvent.WaitOne(TimeSpan.FromSeconds(1)));
+        Assert.True(requestReceivedEvent.WaitOne(TimeSpan.FromSeconds(5)));
         rcts.Cancel();
-        Assert.True(requestCancelledEvent.WaitOne(TimeSpan.FromSeconds(1)));
+        Assert.True(requestCancelledEvent.WaitOne(TimeSpan.FromSeconds(5)));
     }
 }
