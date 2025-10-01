@@ -26,7 +26,7 @@ public class TcpChannelTests
                 serverChannel.Faulted += (s,e) => historyServer.Add("Faulted");
                 await serverChannel.ReceiveAsync(CancellationToken.None);
             }
-            catch(Exception ex)
+            catch(Exception)
             {
 
             }
@@ -108,7 +108,7 @@ public class TcpChannelTests
                 var packet = await serverChannel.ReceiveAsync(CancellationToken.None);
                 receivedPacket = packet.Data.ToArray();
             }
-            catch(Exception ex)
+            catch(Exception)
             {
 
             }

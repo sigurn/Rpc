@@ -36,6 +36,8 @@ public class AesChannel : ProcessionChannel
     {
         lock (_lock)
         {
+            if (_key is null || _iv is null)
+                throw new InvalidDataException("AES key is not defined");
             return (_key, _iv);
         }
     }

@@ -120,8 +120,7 @@ class ChannelProtocol : IProtocol
                     break;
 
                 default:
-                    _sendingBlock = null;
-                    break;
+                    return null;
             }
 
             return _sendingBlock;

@@ -21,7 +21,9 @@ public class RpcSessionTests
             set => throw new NotImplementedException();
         }
 
+#pragma warning disable CS0067
         public event EventHandler? TestEvent;
+#pragma warning restore CS0067
 
         public int Add(int a, int b)
         {

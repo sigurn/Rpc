@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Text;
@@ -636,7 +637,11 @@ namespace Sigurn.Rpc.Generator
                         {
                             var argName = p.Identifier.Text;
                             var modifiers = p.Modifiers.Select(m => m.Text).ToArray();
+                            if (p.Type is null)
+                                throw new NullReferenceException("Method argument type cannot be null");
                             var argType = semanticModel.GetTypeInfo(p.Type).Type;
+                            if (argType is null)
+                                throw new NullReferenceException("Method argument type cannot be null");
                             bool isNullable = p.Type.Kind() == SyntaxKind.NullableType;
                             return new ArgInfo(argName, argType, isNullable, modifiers);
                         }).ToArray());
@@ -652,7 +657,7 @@ namespace Sigurn.Rpc.Generator
                     int orderId = i;
                     var eventSymbol = semanticModel.GetDeclaredSymbol(x.Declaration.Variables.First()) as IEventSymbol;
                     var delegateType = eventSymbol?.Type as INamedTypeSymbol;
-                    var retType = delegateType.DelegateInvokeMethod.ReturnType;
+                    var retType = delegateType?.DelegateInvokeMethod?.ReturnType ?? throw new NullReferenceException("Event return type cannot be null");
                     var args = delegateType?.DelegateInvokeMethod is null ? [] :
                         new EquatableArray<ArgInfo>(delegateType.DelegateInvokeMethod.Parameters
                         .Select(p =>

@@ -176,6 +176,8 @@ class TestServiceAdapter : InterfaceAdapter
                 throw new ArgumentException("Invalid number of arguments");
 
             var handler = await FromBytesAsync<ITestNotification>(args[0], cancellationToken);
+            if (handler is null)
+                throw new NullReferenceException("Handler cannot be null");
             _instance.Unsubscribe(handler);
         }
 
