@@ -351,7 +351,7 @@ public class RpcHandlerTests
         Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
         Assert.NotNull(serverHandler);
 
-        serverHandler.Handle<SuccessPacket>((p, ct) =>
+        serverHandler.Handle<SuccessPacket>(async (p, ct) =>
         {
             using var ctr = ct.Register(() =>
             {
@@ -359,7 +359,8 @@ public class RpcHandlerTests
             });
             requestReceivedEvent.Set();
             ct.WaitHandle.WaitOne();
-            return Task.FromResult<RpcPacket?>(null);
+            await requestCancelledEvent.WaitOneAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+            return null;
         });
 
         CancellationTokenSource rcts = new CancellationTokenSource();
