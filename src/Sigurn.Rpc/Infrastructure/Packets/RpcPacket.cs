@@ -13,13 +13,15 @@ abstract class RpcPacket
         return await Serializer.FromStreamAsync<RpcPacket>(stream, context, cancellationToken);
     }
 
-    public static async Task<T?> FromBytesAsync<T>(byte[] data, SerializationContext context, CancellationToken cancellationToken)
+    public static async Task<T?> FromBytesAsync<T>(byte[]? data, SerializationContext context, CancellationToken cancellationToken)
     {
+        if (data is null) return default;
+        
         using var stream = new MemoryStream(data);
         return await Serializer.FromStreamAsync<T>(stream, context, cancellationToken);
     }
 
-    public static async Task<byte[]> ToBytesAsync<T>(T value, SerializationContext context, CancellationToken cancellationToken)
+    public static async Task<byte[]> ToBytesAsync<T>(T? value, SerializationContext context, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();
         await Serializer.ToStreamAsync<T>(stream, value, context, cancellationToken);

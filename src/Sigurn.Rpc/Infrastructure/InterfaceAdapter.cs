@@ -144,22 +144,22 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
     }
 
-    protected byte[] ToBytes<T>(T value)
+    protected byte[] ToBytes<T>(T? value)
     {
         return ToBytesAsync<T>(value, CancellationToken.None).Result;
     }
 
-    protected Task<byte[]> ToBytesAsync<T>(T value, CancellationToken cancellationToken)
+    protected Task<byte[]> ToBytesAsync<T>(T? value, CancellationToken cancellationToken)
     {
         return RpcPacket.ToBytesAsync<T>(value, _context, cancellationToken);
     }
 
-    protected T? FromBytes<T>(byte[] data)
+    protected T? FromBytes<T>(byte[]? data)
     {
         return FromBytesAsync<T>(data, CancellationToken.None).Result;
     }
 
-    protected async Task<T?> FromBytesAsync<T>(byte[] data, CancellationToken cancellationToken)
+    protected async Task<T?> FromBytesAsync<T>(byte[]? data, CancellationToken cancellationToken)
     {
         return await RpcPacket.FromBytesAsync<T>(data, _context, cancellationToken);
     }

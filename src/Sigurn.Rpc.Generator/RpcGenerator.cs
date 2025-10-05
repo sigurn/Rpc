@@ -18,9 +18,9 @@ namespace System.Runtime.CompilerServices
 
 namespace Sigurn.Rpc.Generator
 {
-    readonly record struct ArgInfo(string Name, ITypeSymbol Type, bool IsNullable, string[] Modifiers);
-    readonly record struct TypePropertyInfo(string Name, TypeInfo Type, int Id, bool isGettable, bool isSettable);
-    readonly record struct TypeMethodInfo(string Name, TypeInfo ReturnType, int Id, bool oneWay, EquatableArray<ArgInfo> Args);
+    readonly record struct ArgInfo(string Name, IParameterSymbol Symbol, string[] Modifiers);
+    readonly record struct TypePropertyInfo(string Name, IPropertySymbol Symbol, int Id);
+    readonly record struct TypeMethodInfo(string Name, IMethodSymbol Symbol, int Id, bool oneWay, EquatableArray<ArgInfo> Args);
     readonly record struct TypeEventInfo(string Name, TypeInfo Type, int Id, ITypeSymbol ReturnType, EquatableArray<ArgInfo> Args);
     readonly record struct RemoteInterfaceTypeInfo(string TypeNamespace, string TypeName, string AdapterName, string ProxyName, EquatableArray<TypePropertyInfo> Properties, EquatableArray<TypeMethodInfo> Methods, EquatableArray<TypeEventInfo> Events);
 
@@ -53,48 +53,6 @@ namespace Sigurn.Rpc.Generator
 
         private void Execute(RemoteInterfaceTypeInfo riti, SourceProductionContext context)
         {
-            // StringBuilder toStreamStringBuilder = new StringBuilder();
-            // StringBuilder fromStreamStringBuilder = new StringBuilder();
-            // if (riti.Properties.Count != 0)
-            //     toStreamStringBuilder.Append($"    public async Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
-            // else
-            //     toStreamStringBuilder.Append($"    public Task ToStreamAsync(Stream stream, {tti.TypeNamespace}.{tti.TypeName} value, SerializationContext context, CancellationToken cancellationToken)\n");
-            // toStreamStringBuilder.Append("    {\n");
-            // toStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(stream);\n");
-            // toStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(context);\n");
-            // toStreamStringBuilder.Append("\n");
-
-            // if (tti.Properties.Count != 0)
-            //     fromStreamStringBuilder.Append($"    public async Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
-            // else
-            //     fromStreamStringBuilder.Append($"    public Task<{tti.TypeNamespace}.{tti.TypeName}> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)\n");
-            // fromStreamStringBuilder.Append("    {\n");
-            // fromStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(stream);\n");
-            // fromStreamStringBuilder.Append("        ArgumentNullException.ThrowIfNull(context);\n");
-            // fromStreamStringBuilder.Append("\n");
-            // if (tti.Properties.Count != 0)
-            //     fromStreamStringBuilder.Append($"        return new {tti.TypeNamespace}.{tti.TypeName}()\n");
-            // else
-            //     fromStreamStringBuilder.Append($"        return Task.FromResult(new {tti.TypeNamespace}.{tti.TypeName}()\n");
-            // fromStreamStringBuilder.Append("        {\n");
-
-            // foreach (var p in tti.Properties.OrderBy(x => x.OrderId))
-            // {
-            //     toStreamStringBuilder.Append($"        await Serializer.ToStreamAsync<{p.Type}>(stream, value.{p.Name}, context, cancellationToken);\n");
-            //     fromStreamStringBuilder.Append($"            {p.Name} = await Serializer.FromStreamAsync<{p.Type}>(stream, context, cancellationToken),\n");
-            // }
-
-            // if (tti.Properties.Count == 0)
-            //     toStreamStringBuilder.Append($"        return Task.CompletedTask;\n");
-
-            // toStreamStringBuilder.Append("    }\n");
-
-            // if (tti.Properties.Count == 0)
-            //     fromStreamStringBuilder.Append("        });\n");
-            // else
-            //     fromStreamStringBuilder.Append("        };\n");
-            // fromStreamStringBuilder.Append("    }\n");
-
             string fullTypeName = $"{riti.TypeNamespace}.{riti.TypeName}";
 
             StringBuilder sb = new StringBuilder();
@@ -156,26 +114,32 @@ namespace Sigurn.Rpc.Generator
                 bool firstSetter = true;
                 foreach (var p in riti.Properties)
                 {
-                    if (p.isGettable)
+                    if (p.Symbol.GetMethod is not null)
                     {
                         if (firstGetter)
                             gsb.Append($"        if (propertyId == {p.Id})\n");
                         else
                             gsb.Append($"        else if (propertyId == {p.Id})\n");
                         gsb.Append("        {\n");
-                        gsb.Append($"            return await ToBytesAsync<{p.Type.Type}>(_instance.{p.Name}, cancellationToken);\n");
+                        gsb.Append($"            return await ToBytesAsync<{p.Symbol.Type}>(_instance.{p.Name}, cancellationToken)");
+                        if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                            gsb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
+                        gsb.Append(";\n");
                         gsb.Append("        }\n");
                         firstGetter = false;
                     }
 
-                    if (p.isSettable)
+                    if (p.Symbol.SetMethod is not null)
                     {
                         if (firstSetter)
                             ssb.Append($"        if (propertyId == {p.Id})\n");
                         else
                             ssb.Append($"        else if (propertyId == {p.Id})\n");
                         ssb.Append("        {\n");
-                        ssb.Append($"            _instance.{p.Name} = await FromBytesAsync<{p.Type.Type}>(value, cancellationToken);\n");
+                        ssb.Append($"            _instance.{p.Name} = await FromBytesAsync<{p.Symbol.Type}>(value, cancellationToken)");
+                        if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                            ssb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
+                        ssb.Append(";\n");
                         ssb.Append("            return;\n");
                         ssb.Append("        }\n");
                         firstSetter = false;
@@ -207,7 +171,7 @@ namespace Sigurn.Rpc.Generator
                     else
                         sb.Append($"        else if (methodId == {m.Id})\n");
                     sb.Append("        {\n");
-                    var count = m.Args.Where(x => x.Type.ToString() != _cancellationTokenName).Count();
+                    var count = m.Args.Where(x => x.Symbol.Type.ToString() != _cancellationTokenName).Count();
                     if (count != 0)
                     {
                         sb.Append($"            if (args is null || args.Count != {count})\n");
@@ -221,13 +185,16 @@ namespace Sigurn.Rpc.Generator
                     foreach (var a in m.Args)
                     {
                         var argName = $"@{a.Name}";
-                        if (a.Type.ToString() == _cancellationTokenName)
+                        if (a.Symbol.Type.ToString() == _cancellationTokenName)
                         {
                             argName = "cancellationToken";
                         }
                         else
                         {
-                            sb.Append($"            var {argName} = await FromBytesAsync<{a.Type}>(args[{n++}], cancellationToken);\n");
+                            sb.Append($"            var {argName} = await FromBytesAsync<{a.Symbol.Type}>(args[{n++}], cancellationToken)");
+                            if (a.Symbol.Type.IsReferenceType && a.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                                sb.Append($" ?? throw new ArgumentNullException(\"{a.Symbol.Name}\")");
+                            sb.Append(";\n");
                         }
 
                         if (args != string.Empty)
@@ -242,22 +209,22 @@ namespace Sigurn.Rpc.Generator
                         args += $"{argName}";
                     }
 
-                    if (m.ReturnType.Type?.ToString() == "void")
+                    if (m.Symbol.ReturnType.ToString() == "void")
                     {
                         sb.Append($"            _instance.{m.Name}({args});\n");
                         if (outArgs)
                         {
                             var outArgsString = string.Join(", ", m.Args
                                 .Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out"))
-                                .Select(x => $"await ToBytesAsync<{x.Type}>(@{x.Name}, cancellationToken)"));
+                                .Select(x => $"await ToBytesAsync<{x.Symbol.Type}>(@{x.Symbol.Name}, cancellationToken)"));
                             sb.Append($"            return (Result: null, [{outArgsString}]);\n");
                         }
                     }
-                    else if (m.ReturnType.Type?.ToString() == _taskName)
+                    else if (m.Symbol.ReturnType.ToString() == _taskName)
                     {
                         sb.Append($"            await _instance.{m.Name}({args});\n");
                     }
-                    else if (m.ReturnType.Type is INamedTypeSymbol nts &&
+                    else if (m.Symbol.ReturnType is INamedTypeSymbol nts &&
                         nts.IsGenericType && nts.ConstructedFrom.ToString() == _genericTaskName)
                     {
                         sb.Append($"            var @__res = await _instance.{m.Name}({args});\n");
@@ -265,17 +232,17 @@ namespace Sigurn.Rpc.Generator
                     }
                     else
                     {
-                        sb.Append($"            {m.ReturnType.Type} @__res = _instance.{m.Name}({args});\n");
+                        sb.Append($"            {m.Symbol.ReturnType} @__res = _instance.{m.Name}({args});\n");
                         if (outArgs)
                         {
                             var outArgsString = string.Join(", ", m.Args
                                 .Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out"))
-                                .Select(x => $"await ToBytesAsync<{x.Type}>(@{x.Name}, cancellationToken)"));
-                            sb.Append($"            return (Result: await ToBytesAsync<{m.ReturnType.Type}>(@__res, cancellationToken), [{outArgsString}]);\n");
+                                .Select(x => $"await ToBytesAsync<{x.Symbol.Type}>(@{x.Symbol.Name}, cancellationToken)"));
+                            sb.Append($"            return (Result: await ToBytesAsync<{m.Symbol.ReturnType}>(@__res, cancellationToken), [{outArgsString}]);\n");
                         }
                         else
                         {
-                            sb.Append($"            return (Result: await ToBytesAsync<{m.ReturnType.Type}>(@__res, cancellationToken), null);\n");
+                            sb.Append($"            return (Result: await ToBytesAsync<{m.Symbol.ReturnType}>(@__res, cancellationToken), null);\n");
                         }
                     }
                     sb.Append("        }\n");
@@ -304,19 +271,19 @@ namespace Sigurn.Rpc.Generator
                 bool firstEvent = true;
                 foreach (var e in riti.Events)
                 {
-                    var args = string.Join(", ", e.Args.Select(x => $"{x.Type} {x.Name}"));
+                    var args = string.Join(", ", e.Args.Select(x => $"{x.Symbol.Type} {x.Name}"));
 
                     ehsb.Append("\n");
                     ehsb.Append($"    private void On{e.Name}({args})\n");
                     ehsb.Append("    {\n");
                     var eventArgs = e.Args
-                        .Where(x => x.Name != "sender" && x.Type.ToString() != "object?")
+                        .Where(x => x.Name != "sender" && x.Symbol.Type.ToString() != "object?")
                         .ToArray();
                     if (eventArgs.Length != 0)
                     {
                         ehsb.Append($"        SendEvent({e.Id}");
                         foreach (var ea in eventArgs)
-                            ehsb.Append($", ToBytes<{ea.Type}>({ea.Name})");
+                            ehsb.Append($", ToBytes<{ea.Symbol.Type}>({ea.Name})");
                         ehsb.Append(");\n");
                     }
                     ehsb.Append("    }\n");
@@ -389,12 +356,22 @@ namespace Sigurn.Rpc.Generator
             {
                 foreach (var p in riti.Properties)
                 {
-                    sb.Append($"    {p.Type.Type} {fullTypeName}.{p.Name}\n");
+                    sb.Append($"    {p.Symbol.Type}");
+                    sb.Append($" {fullTypeName}.{p.Name}\n");
                     sb.Append("    {\n");
-                    if (p.isGettable)
-                        sb.Append($"        get => GetProperty<{p.Type.Type}>({p.Id});\n");
-                    if (p.isSettable)
-                        sb.Append($"        set => SetProperty<{p.Type.Type}>({p.Id}, value);\n");
+                    if (p.Symbol.GetMethod is not null)
+                    {
+                        sb.Append($"        get => GetProperty<{p.Symbol.Type}>({p.Id})");
+                        if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                        // if (p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                            sb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
+                        sb.Append(";\n");
+                    }
+
+                    if (p.Symbol.SetMethod is not null)
+                    {
+                        sb.Append($"        set => SetProperty<{p.Symbol.Type}>({p.Id}, value);\n");
+                    }
                     sb.Append("    }\n");
                     sb.Append("\n");
                 }
@@ -405,48 +382,48 @@ namespace Sigurn.Rpc.Generator
                 foreach (var m in riti.Methods)
                 {
                     {
-                        bool isAsync = m.ReturnType.Type?.ToString() == _taskName ||
-                            (m.ReturnType.Type is INamedTypeSymbol nts &&
+                        bool isAsync = m.Symbol.ReturnType.ToString() == _taskName ||
+                            (m.Symbol.ReturnType is INamedTypeSymbol nts &&
                             nts.IsGenericType && nts.ConstructedFrom.ToString() == _genericTaskName);
                         if (isAsync)
-                            sb.Append($"    async {m.ReturnType.Type} {fullTypeName}.{m.Name}(");
+                            sb.Append($"    async {m.Symbol.ReturnType} {fullTypeName}.{m.Name}(");
                         else
-                            sb.Append($"    {m.ReturnType.Type} {fullTypeName}.{m.Name}(");
+                            sb.Append($"    {m.Symbol.ReturnType} {fullTypeName}.{m.Name}(");
                     }
                     sb.Append(string.Join(", ", m.Args.Select(a =>
                     {
                         var modifiers = string.Join(" ", a.Modifiers);
-                        return string.IsNullOrEmpty(modifiers) ? $"{a.Type} {a.Name}" : $"{modifiers} {a.Type} {a.Name}";
+                        return string.IsNullOrEmpty(modifiers) ? $"{a.Symbol.Type} {a.Symbol.Name}" : $"{modifiers} {a.Symbol.Type} {a.Symbol.Name}";
                     })));
                     sb.Append(")\n");
                     sb.Append("    {\n");
                     bool args = false;
                     bool outArgs = false;
                     string? cancellationToken = m.Args
-                        .Where(x => x.Type.ToString() == _cancellationTokenName)
+                        .Where(x => x.Symbol.Type.ToString() == _cancellationTokenName)
                         .Select(x => x.Name)
                         .FirstOrDefault() ?? $"{_cancellationTokenName}.None";
                     var realArgs = m.Args
-                        .Where(x => x.Type.ToString() != _cancellationTokenName)
+                        .Where(x => x.Symbol.Type.ToString() != _cancellationTokenName)
                         .ToArray();
                     if (realArgs.Any())
                     {
-                        sb.Append("        IReadOnlyList<byte[]> args =\n");
+                        sb.Append("        IReadOnlyList<byte[]> @args =\n");
                         sb.Append("        [\n");
 
                         foreach (var a in realArgs)
                         {
                             if (a.Modifiers.Contains("ref") || a.Modifiers.Contains("out")) outArgs = true;
-                            sb.Append($"            ToBytes<{a.Type}>({a.Name}),\n");
+                            sb.Append($"            ToBytes<{a.Symbol.Type}>({a.Symbol.Name}),\n");
                         }
                         sb.Append("        ];\n");
                         sb.Append("\n");
                         args = true;
                     }
-                    var argsText = args ? "args" : "[]";
-                    if (m.ReturnType.Type?.ToString() == "void")
+                    var argsText = args ? "@args" : "[]";
+                    if (m.Symbol.ReturnType.ToString() == "void")
                     {
-                        var resText = outArgs ? "var (_, outArgs) = " : "";
+                        var resText = outArgs ? "var (_, @outArgs) = " : "";
                         bool oneWay = !outArgs && m.oneWay;
                         sb.Append($"        {resText}InvokeMethod({m.Id}, {argsText}, {oneWay.ToString().ToLower()});\n");
 
@@ -454,12 +431,12 @@ namespace Sigurn.Rpc.Generator
                         {
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
-                                sb.Append($"        {oa.Name} = FromBytes<{oa.Type}>(outArgs[{an++}]);\n");
+                                sb.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}]);\n");
                         }
                     }
-                    else if (m.ReturnType.Type?.ToString() == _taskName)
+                    else if (m.Symbol.ReturnType.ToString() == _taskName)
                     {
-                        var resText = outArgs ? "var (_, outArgs) = " : "";
+                        var resText = outArgs ? "var (_, @outArgs) = " : "";
                         bool oneWay = !outArgs && m.oneWay;
 
                         sb.Append($"        {resText} await InvokeMethodAsync({m.Id}, {argsText}, {oneWay.ToString().ToLower()}, {cancellationToken});\n");
@@ -468,29 +445,45 @@ namespace Sigurn.Rpc.Generator
                         {
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
-                                sb.Append($"        {oa.Name} = await FromBytesAsync<{oa.Type}>(outArgs[{an++}], {cancellationToken});\n");
+                            {
+                                sb.Append($"        {oa.Name} = await FromBytesAsync<{oa.Symbol.Type}>(@outArgs[{an++}], {cancellationToken})");
+                                if (oa.Symbol.Type.IsReferenceType && oa.Symbol.Type.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                                    sb.Append($" ?? throw new InvalidOperationException(\"Output argument '{oa.Symbol.Name}' value cannot be null\")");
+                                sb.Append(";\n");
+                            }
                         }
                     }
-                    else if (m.ReturnType.Type is INamedTypeSymbol nts &&
+                    else if (m.Symbol.ReturnType is INamedTypeSymbol nts &&
                         nts.IsGenericType && nts.ConstructedFrom.ToString() == _genericTaskName)
                     {
-                        sb.Append($"        var (res, _) = await InvokeMethodAsync({m.Id}, {argsText}, false, {cancellationToken});\n");
-                        sb.Append($"        return await FromBytesAsync<{nts.TypeArguments[0]}>(res, {cancellationToken});\n");
+                        sb.Append($"        var (@res, _) = await InvokeMethodAsync({m.Id}, {argsText}, false, {cancellationToken});\n");
+                        sb.Append($"        return await FromBytesAsync<{nts.TypeArguments[0]}>(@res, {cancellationToken})");
+                        if (nts.TypeArguments[0].IsReferenceType && nts.TypeArguments[0].NullableAnnotation == NullableAnnotation.NotAnnotated)
+                            sb.Append(" ?? throw new InvalidOperationException(\"Method return value cannot be null.\")");
+                        sb.Append(";\n");
                     }
                     else
                     {
-                        var resText = outArgs ? "(res, outArgs)" : "(res, _)";
+                        var resText = outArgs ? "(@res, @outArgs)" : "(res, _)";
                         sb.Append($"        var {resText} = InvokeMethod({m.Id}, {argsText}, false);\n");
                         sb.Append("\n");
                         if (outArgs)
                         {
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
-                                sb.Append($"        {oa.Name} = FromBytes<{oa.Type}>(outArgs[{an++}]);\n");
+                            {
+                                sb.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}])");
+                                if (oa.Symbol.Type.IsReferenceType && oa.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                                    sb.Append($" ?? throw new InvalidOperationException(\"Output value for argument '{oa.Symbol.Name}' cannot be null.\")");
+                                sb.Append(";\n");
+                            }
                             sb.Append("\n");
                         }
 
-                        sb.Append($"        return FromBytes<{m.ReturnType.Type}>(res);\n");
+                        sb.Append($"        return FromBytes<{m.Symbol.ReturnType}>(@res)");
+                        if (m.Symbol.ReturnType.IsReferenceType && m.Symbol.ReturnNullableAnnotation == NullableAnnotation.NotAnnotated)
+                            sb.Append(" ?? throw new InvalidOperationException(\"Method return value cannot be null.\")");
+                        sb.Append(";\n");
                     }
 
                     sb.Append("    }\n");
@@ -534,11 +527,11 @@ namespace Sigurn.Rpc.Generator
                     {
                         if (!firstArg)
                             ehsp.Append(", ");
-                        if (a.Type.ToString().StartsWith("object") && a.Name == "sender")
+                        if (a.Symbol.Type.ToString().StartsWith("object") && a.Name == "sender")
                             ehsp.Append("this");
                         else
                         {
-                            ehsp.Append($"FromBytes<{a.Type}>(args[{an}])");
+                            ehsp.Append($"FromBytes<{a.Symbol.Type}>(args[{an}])");
                             an++;
                         }
                         firstArg = false;
@@ -590,22 +583,13 @@ namespace Sigurn.Rpc.Generator
                     var setAccessor = x.AccessorList?.Accessors.Where(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)).FirstOrDefault();
                     if (getAccessor is null && setAccessor is null) return false;
 
-                    // var initAccessor = x.AccessorList?.Accessors.Where(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)).FirstOrDefault();
-                    //if (setAccessor is null) return false;
-                    //if (setAccessor != null && setAccessor.Modifiers.Count != 0 && 
-                    //     !setAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword))) return false;
-
-                    // if (initAccessor != null && initAccessor.Modifiers.Count != 0 && 
-                    //     !initAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) &&
-                    //     !initAccessor.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword))) return false;
-
                     return true;
                 });
 
             var props = new EquatableArray<TypePropertyInfo>(publicProps.Select((p, i) =>
             {
                 var name = p.Identifier.Text;
-                var type = semanticModel.GetTypeInfo(p.Type);
+                var symbol = semanticModel.GetDeclaredSymbol(p) ?? throw new InvalidOperationException("Cannot get proprty symbol");
                 var getAccessor = p.AccessorList?.Accessors.Where(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)).FirstOrDefault();
                 var setAccessor = p.AccessorList?.Accessors.Where(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)).FirstOrDefault();
                 int orderId = i;
@@ -622,7 +606,7 @@ namespace Sigurn.Rpc.Generator
                 //     }
                 // } 
 
-                return new TypePropertyInfo(name, type, orderId, getAccessor is not null, setAccessor is not null);
+                return new TypePropertyInfo(name, symbol, orderId);
             }).ToArray());
 
             var methods = new EquatableArray<TypeMethodInfo>(syntaxNode.Members
@@ -631,6 +615,9 @@ namespace Sigurn.Rpc.Generator
                 {
                     var name = x.Identifier.Text;
                     var returnType = semanticModel.GetTypeInfo(x.ReturnType);
+                    var symbol = semanticModel.GetDeclaredSymbol(x);
+                    if (symbol is null)
+                        throw new InvalidOperationException($"Cannot get symbol for '{x.Identifier.Text}' method.");
                     int orderId = i;
                     var args = new EquatableArray<ArgInfo>(x.ParameterList.Parameters
                         .Select(p =>
@@ -639,13 +626,12 @@ namespace Sigurn.Rpc.Generator
                             var modifiers = p.Modifiers.Select(m => m.Text).ToArray();
                             if (p.Type is null)
                                 throw new NullReferenceException("Method argument type cannot be null");
-                            var argType = semanticModel.GetTypeInfo(p.Type).Type;
-                            if (argType is null)
-                                throw new NullReferenceException("Method argument type cannot be null");
-                            bool isNullable = p.Type.Kind() == SyntaxKind.NullableType;
-                            return new ArgInfo(argName, argType, isNullable, modifiers);
+                            var argSymbol = semanticModel.GetDeclaredSymbol(p);
+                            if (argSymbol is null)
+                                throw new InvalidOperationException($"Cannot get symbol for method argument '{p.Identifier.Text}'");
+                            return new ArgInfo(argName, argSymbol, modifiers);
                         }).ToArray());
-                    return new TypeMethodInfo(name, returnType, orderId, false, args);
+                    return new TypeMethodInfo(name, symbol, orderId, false, args);
                 }).ToArray());
 
             var events = new EquatableArray<TypeEventInfo>(syntaxNode.Members
@@ -660,12 +646,7 @@ namespace Sigurn.Rpc.Generator
                     var retType = delegateType?.DelegateInvokeMethod?.ReturnType ?? throw new NullReferenceException("Event return type cannot be null");
                     var args = delegateType?.DelegateInvokeMethod is null ? [] :
                         new EquatableArray<ArgInfo>(delegateType.DelegateInvokeMethod.Parameters
-                        .Select(p =>
-                        {
-                            var argName = p.Name;
-                            var argType = p.Type;
-                            return new ArgInfo(argName, argType, false, []);
-                        }).ToArray());
+                        .Select(p => new ArgInfo(p.Name, p, [])).ToArray());
                     return new TypeEventInfo(name, type, orderId, retType, args);
                 }).ToArray());
 

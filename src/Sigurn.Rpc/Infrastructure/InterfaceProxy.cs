@@ -294,7 +294,7 @@ public class InterfaceProxy : IDisposable
         return RpcPacket.ToBytesAsync(value, Context, cancellationToken);
     }
 
-    protected Task<T?> FromBytesAsync<T>(byte[] data, CancellationToken cancellationToken)
+    protected Task<T?> FromBytesAsync<T>(byte[]? data, CancellationToken cancellationToken)
     {
         return RpcPacket.FromBytesAsync<T>(data, Context, cancellationToken);
     }
@@ -304,7 +304,7 @@ public class InterfaceProxy : IDisposable
         return ToBytesAsync<T>(value, CancellationToken.None).Result;
     }
 
-    protected T? FromBytes<T>(byte[] data)
+    protected T? FromBytes<T>(byte[]? data)
     {
         return FromBytesAsync<T>(data, CancellationToken.None).Result;
     }

@@ -20,7 +20,7 @@ public static class VerifyInitializer
 public class RpcGeneratorTests
 {
     private static readonly string dotNetAssemblyPath = Path.GetDirectoryName(typeof(object).Assembly.Location) ?? string.Empty;
-    
+
     [Fact]
     public Task Run() => VerifyChecks.Run();
 
@@ -47,6 +47,7 @@ namespace MyCode
         int Prop2 { get; }
         int Prop3 { set; }
         IList<Guid> Prop4 { get; init; }
+        bool? Prop5 { get; set; }
 
         void Method1 ();
         bool Method2 ();
@@ -76,28 +77,52 @@ namespace MyCode
         await Verify(driver);
     }
 
+    // private static Compilation CreateCompilation(string source)
+    // {
+    //     var parseOptions = CSharpParseOptions.Default
+    //         .WithLanguageVersion(LanguageVersion.Latest)
+    //         .WithFeatures(new[] { new KeyValuePair<string, string>("nullable", "enable") });
+
+    //     return CSharpCompilation.Create("compilation",
+    //         new[] { CSharpSyntaxTree.ParseText(source, parseOptions) },
+    //         new[] {
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "mscorlib.dll")),
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.dll")),
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Private.Xml.dll")),
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Xml.ReaderWriter.dll")),
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Core.dll")),
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Private.CoreLib.dll")),
+    //             MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Runtime.dll")),
+    //             MetadataReference.CreateFromFile(typeof(NullableAttribute).Assembly.Location),
+    //             MetadataReference.CreateFromFile(typeof(System.Diagnostics.CodeAnalysis.NotNullAttribute).Assembly.Location),
+    //             MetadataReference.CreateFromFile(typeof(RemoteInterfaceAttribute).Assembly.Location)
+    //          },
+    //         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+    //             .WithNullableContextOptions(NullableContextOptions.Enable));
+    // }
+    
     private static Compilation CreateCompilation(string source)
     {
         var parseOptions = CSharpParseOptions.Default
-            .WithLanguageVersion(LanguageVersion.Latest)
-            .WithFeatures(new[] { new KeyValuePair<string, string>("nullable", "enable") });
+            .WithLanguageVersion(LanguageVersion.Latest);
 
-        return CSharpCompilation.Create("compilation",
+        // Получаем все "trusted" assemblies, которые .NET загружает для текущего рантайма
+        var trustedAssemblies = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))
+            ?.Split(Path.PathSeparator)
+            ?? Array.Empty<string>();
+
+        var references = trustedAssemblies
+            .Select(p => MetadataReference.CreateFromFile(p))
+            .Append(MetadataReference.CreateFromFile(typeof(RemoteInterfaceAttribute).Assembly.Location))
+            .ToArray();
+
+        return CSharpCompilation.Create(
+            "compilation",
             new[] { CSharpSyntaxTree.ParseText(source, parseOptions) },
-            new[] {
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "mscorlib.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Private.Xml.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Xml.ReaderWriter.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Core.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Private.CoreLib.dll")),
-                MetadataReference.CreateFromFile(Path.Combine(dotNetAssemblyPath, "System.Runtime.dll")),
-                MetadataReference.CreateFromFile(typeof(NullableAttribute).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(System.Diagnostics.CodeAnalysis.NotNullAttribute).Assembly.Location),
-                MetadataReference.CreateFromFile(typeof(RemoteInterfaceAttribute).Assembly.Location)
-             },
+            references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
-                .WithNullableContextOptions(NullableContextOptions.Enable));
+                .WithNullableContextOptions(NullableContextOptions.Enable)
+        );
     }
 }
 

@@ -7,6 +7,8 @@ public interface ITestService
     bool Prop2 { get; set; }
     IReadOnlyList<int> Prop3 { get; set; }
 
+    string? Prop4 { get; set; }
+
     public void Method1();
 
     public Task Method2();
@@ -24,6 +26,8 @@ public sealed class TestService : ITestService
     public int Prop1 { get; set; }
     public bool Prop2 { get; set; }
     public IReadOnlyList<int> Prop3 { get; set; } = new List<int>();
+
+    public string? Prop4 { get; set; }
 
     public event EventHandler? Event1;
 

@@ -30,7 +30,7 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
     {
         if (propertyId == 0)
         {
-            return await ToBytesAsync<string>(_instance.Prop1, cancellationToken);
+            return await ToBytesAsync<string?>(_instance.Prop1, cancellationToken);
         }
         else if (propertyId == 1)
         {
@@ -38,7 +38,11 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
         }
         else if (propertyId == 3)
         {
-            return await ToBytesAsync<System.Collections.Generic.IList<System.Guid>>(_instance.Prop4, cancellationToken);
+            return await ToBytesAsync<System.Collections.Generic.IList<System.Guid>>(_instance.Prop4, cancellationToken) ?? throw new InvalidOperationException("Property value cannot be null");
+        }
+        else if (propertyId == 4)
+        {
+            return await ToBytesAsync<bool?>(_instance.Prop5, cancellationToken);
         }
 
         throw new Exception("Unknown property");
@@ -48,12 +52,22 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
     {
         if (propertyId == 0)
         {
-            _instance.Prop1 = await FromBytesAsync<string>(value, cancellationToken);
+            _instance.Prop1 = await FromBytesAsync<string?>(value, cancellationToken);
             return;
         }
         else if (propertyId == 2)
         {
             _instance.Prop3 = await FromBytesAsync<int>(value, cancellationToken);
+            return;
+        }
+        else if (propertyId == 3)
+        {
+            _instance.Prop4 = await FromBytesAsync<System.Collections.Generic.IList<System.Guid>>(value, cancellationToken) ?? throw new InvalidOperationException("Property value cannot be null");
+            return;
+        }
+        else if (propertyId == 4)
+        {
+            _instance.Prop5 = await FromBytesAsync<bool?>(value, cancellationToken);
             return;
         }
 
@@ -76,7 +90,7 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken);
+            var @text = await FromBytesAsync<string?>(args[0], cancellationToken);
             _instance.Method3(@text);
         }
         else if (methodId == 3)
@@ -84,7 +98,7 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken);
+            var @text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
             string @__res = _instance.Method4(@text);
             return (Result: await ToBytesAsync<string>(@__res, cancellationToken), null);
         }
@@ -93,7 +107,7 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken);
+            var @text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
             _instance.Method5(out @text);
             return (Result: null, [await ToBytesAsync<string>(@text, cancellationToken)]);
         }
@@ -102,7 +116,7 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken);
+            var @text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
             _instance.Method6(ref @text);
             return (Result: null, [await ToBytesAsync<string>(@text, cancellationToken)]);
         }
@@ -112,14 +126,14 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
                 throw new ArgumentException("Invalid number of arguments");
 
             var @n = await FromBytesAsync<int>(args[0], cancellationToken);
-            var @outText = await FromBytesAsync<string[]>(args[1], cancellationToken);
+            var @outText = await FromBytesAsync<string[]>(args[1], cancellationToken) ?? throw new ArgumentNullException("outText");
             bool @__res = _instance.Method7(ref @n, out @outText);
             return (Result: await ToBytesAsync<bool>(@__res, cancellationToken), [await ToBytesAsync<int>(@n, cancellationToken), await ToBytesAsync<string[]>(@outText, cancellationToken)]);
         }
         else if (methodId == 7)
         {
-            string @__res = _instance.Method8();
-            return (Result: await ToBytesAsync<string>(@__res, cancellationToken), null);
+            string? @__res = _instance.Method8();
+            return (Result: await ToBytesAsync<string?>(@__res, cancellationToken), null);
         }
         else if (methodId == 8)
         {
@@ -140,7 +154,7 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
                 throw new ArgumentException("Invalid number of arguments");
 
             var @flag = await FromBytesAsync<bool>(args[0], cancellationToken);
-            var @text = await FromBytesAsync<string>(args[1], cancellationToken);
+            var @text = await FromBytesAsync<string>(args[1], cancellationToken) ?? throw new ArgumentNullException("text");
             await _instance.Method12(@flag, @text, cancellationToken);
         }
         else if (methodId == 12)
@@ -148,8 +162,8 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
             if (args is null || args.Count != 2)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text1 = await FromBytesAsync<string>(args[0], cancellationToken);
-            var @text2 = await FromBytesAsync<string>(args[1], cancellationToken);
+            var @text1 = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text1");
+            var @text2 = await FromBytesAsync<string>(args[1], cancellationToken) ?? throw new ArgumentNullException("text2");
             var @__res = await _instance.Method13(@text1, @text2, cancellationToken);
             return (Result: await ToBytesAsync<string>(@__res, cancellationToken), null);
         }
@@ -216,10 +230,10 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
     {
     }
 
-    string MyCode.ITestService.Prop1
+    string? MyCode.ITestService.Prop1
     {
-        get => GetProperty<string>(0);
-        set => SetProperty<string>(0, value);
+        get => GetProperty<string?>(0);
+        set => SetProperty<string?>(0, value);
     }
 
     int MyCode.ITestService.Prop2
@@ -234,7 +248,14 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
 
     System.Collections.Generic.IList<System.Guid> MyCode.ITestService.Prop4
     {
-        get => GetProperty<System.Collections.Generic.IList<System.Guid>>(3);
+        get => GetProperty<System.Collections.Generic.IList<System.Guid>>(3) ?? throw new InvalidOperationException("Property value cannot be null");
+        set => SetProperty<System.Collections.Generic.IList<System.Guid>>(3, value);
+    }
+
+    bool? MyCode.ITestService.Prop5
+    {
+        get => GetProperty<bool?>(4);
+        set => SetProperty<bool?>(4, value);
     }
 
     void MyCode.ITestService.Method1()
@@ -246,81 +267,81 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
     {
         var (res, _) = InvokeMethod(1, [], false);
 
-        return FromBytes<bool>(res);
+        return FromBytes<bool>(@res);
     }
 
-    void MyCode.ITestService.Method3(string text)
+    void MyCode.ITestService.Method3(string? text)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
-            ToBytes<string>(text),
+            ToBytes<string?>(text),
         ];
 
-        InvokeMethod(2, args, false);
+        InvokeMethod(2, @args, false);
     }
 
     string MyCode.ITestService.Method4(string text)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
             ToBytes<string>(text),
         ];
 
-        var (res, _) = InvokeMethod(3, args, false);
+        var (res, _) = InvokeMethod(3, @args, false);
 
-        return FromBytes<string>(res);
+        return FromBytes<string>(@res) ?? throw new InvalidOperationException("Method return value cannot be null.");
     }
 
     void MyCode.ITestService.Method5(out string text)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
             ToBytes<string>(text),
         ];
 
-        var (_, outArgs) = InvokeMethod(4, args, false);
-        text = FromBytes<string>(outArgs[0]);
+        var (_, @outArgs) = InvokeMethod(4, @args, false);
+        text = FromBytes<string>(@outArgs[0]);
     }
 
     void MyCode.ITestService.Method6(ref string text)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
             ToBytes<string>(text),
         ];
 
-        var (_, outArgs) = InvokeMethod(5, args, false);
-        text = FromBytes<string>(outArgs[0]);
+        var (_, @outArgs) = InvokeMethod(5, @args, false);
+        text = FromBytes<string>(@outArgs[0]);
     }
 
     bool MyCode.ITestService.Method7(ref int n, out string[] outText)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
             ToBytes<int>(n),
             ToBytes<string[]>(outText),
         ];
 
-        var (res, outArgs) = InvokeMethod(6, args, false);
+        var (@res, @outArgs) = InvokeMethod(6, @args, false);
 
-        n = FromBytes<int>(outArgs[0]);
-        outText = FromBytes<string[]>(outArgs[1]);
+        n = FromBytes<int>(@outArgs[0]);
+        outText = FromBytes<string[]>(@outArgs[1]) ?? throw new InvalidOperationException("Output value for argument 'outText' cannot be null.");
 
-        return FromBytes<bool>(res);
+        return FromBytes<bool>(@res);
     }
 
-    string MyCode.ITestService.Method8()
+    string? MyCode.ITestService.Method8()
     {
         var (res, _) = InvokeMethod(7, [], false);
 
-        return FromBytes<string>(res);
+        return FromBytes<string?>(@res);
     }
 
     bool? MyCode.ITestService.Method9()
     {
         var (res, _) = InvokeMethod(8, [], false);
 
-        return FromBytes<bool?>(res);
+        return FromBytes<bool?>(@res);
     }
 
     async System.Threading.Tasks.Task MyCode.ITestService.Method10()
@@ -335,25 +356,25 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
 
     async System.Threading.Tasks.Task MyCode.ITestService.Method12(bool flag, string text, System.Threading.CancellationToken cancellationToken)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
             ToBytes<bool>(flag),
             ToBytes<string>(text),
         ];
 
-         await InvokeMethodAsync(11, args, false, cancellationToken);
+         await InvokeMethodAsync(11, @args, false, cancellationToken);
     }
 
     async System.Threading.Tasks.Task<string> MyCode.ITestService.Method13(string text1, string text2, System.Threading.CancellationToken cancellationToken)
     {
-        IReadOnlyList<byte[]> args =
+        IReadOnlyList<byte[]> @args =
         [
             ToBytes<string>(text1),
             ToBytes<string>(text2),
         ];
 
-        var (res, _) = await InvokeMethodAsync(12, args, false, cancellationToken);
-        return await FromBytesAsync<string>(res, cancellationToken);
+        var (@res, _) = await InvokeMethodAsync(12, @args, false, cancellationToken);
+        return await FromBytesAsync<string>(@res, cancellationToken) ?? throw new InvalidOperationException("Method return value cannot be null.");
     }
 
     private System.EventHandler? _Event1;
