@@ -411,11 +411,11 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
     {
         if (eventId == 0)
         {
-            _Event1?.Invoke(this, FromBytes<System.EventArgs>(args[0]));
+            _Event1?.Invoke(this, FromBytes<System.EventArgs>(args[0]) ?? throw new ArgumentNullException("e"));
         }
         else if (eventId == 1)
         {
-            _Event2?.Invoke(this, FromBytes<string>(args[0]));
+            _Event2?.Invoke(this, FromBytes<string>(args[0]) ?? throw new ArgumentNullException("e"));
         }
     }
 }

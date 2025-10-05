@@ -21,7 +21,7 @@ namespace Sigurn.Rpc.Generator
     readonly record struct ArgInfo(string Name, IParameterSymbol Symbol, string[] Modifiers);
     readonly record struct TypePropertyInfo(string Name, IPropertySymbol Symbol, int Id);
     readonly record struct TypeMethodInfo(string Name, IMethodSymbol Symbol, int Id, bool oneWay, EquatableArray<ArgInfo> Args);
-    readonly record struct TypeEventInfo(string Name, TypeInfo Type, int Id, ITypeSymbol ReturnType, EquatableArray<ArgInfo> Args);
+    readonly record struct TypeEventInfo(string Name, IEventSymbol Symbol, int Id, ITypeSymbol ReturnType, EquatableArray<ArgInfo> Args);
     readonly record struct RemoteInterfaceTypeInfo(string TypeNamespace, string TypeName, string AdapterName, string ProxyName, EquatableArray<TypePropertyInfo> Properties, EquatableArray<TypeMethodInfo> Methods, EquatableArray<TypeEventInfo> Events);
 
     /// <summary>
@@ -499,8 +499,8 @@ namespace Sigurn.Rpc.Generator
                 bool firstEvent = true;
                 foreach (var e in riti.Events)
                 {
-                    sb.Append($"    private {e.Type.Type}? _{e.Name};\n");
-                    sb.Append($"    event {e.Type.Type} {fullTypeName}.{e.Name}\n");
+                    sb.Append($"    private {e.Symbol.Type}? _{e.Name};\n");
+                    sb.Append($"    event {e.Symbol.Type} {fullTypeName}.{e.Name}\n");
                     sb.Append("    {\n");
                     sb.Append($"        add\n");
                     sb.Append("        {\n");
@@ -532,6 +532,8 @@ namespace Sigurn.Rpc.Generator
                         else
                         {
                             ehsp.Append($"FromBytes<{a.Symbol.Type}>(args[{an}])");
+                            if (a.Symbol.Type.IsReferenceType && a.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                                ehsp.Append($" ?? throw new ArgumentNullException(\"{a.Symbol.Name}\")");
                             an++;
                         }
                         firstArg = false;
@@ -639,15 +641,18 @@ namespace Sigurn.Rpc.Generator
                 .Select((x, i) =>
                 {
                     var name = x.Declaration.Variables.First().Identifier.Text;
-                    var type = semanticModel.GetTypeInfo(x.Declaration.Type);
+                    var symbol = (IEventSymbol?)semanticModel.GetDeclaredSymbol(x.Declaration.Variables.First());
+                    if (symbol is null)
+                        throw new InvalidOperationException("Cannot get symbol for event declaration");
                     int orderId = i;
-                    var eventSymbol = semanticModel.GetDeclaredSymbol(x.Declaration.Variables.First()) as IEventSymbol;
-                    var delegateType = eventSymbol?.Type as INamedTypeSymbol;
-                    var retType = delegateType?.DelegateInvokeMethod?.ReturnType ?? throw new NullReferenceException("Event return type cannot be null");
-                    var args = delegateType?.DelegateInvokeMethod is null ? [] :
+                    var delegateType = (INamedTypeSymbol)symbol.Type;
+                    if (delegateType.DelegateInvokeMethod is null)
+                        throw new InvalidOperationException("Cannot get information about event filed delegate");
+                    var retType = delegateType.DelegateInvokeMethod?.ReturnType ?? throw new NullReferenceException("Event return type cannot be null");
+                    var args = delegateType.DelegateInvokeMethod is null ? [] :
                         new EquatableArray<ArgInfo>(delegateType.DelegateInvokeMethod.Parameters
                         .Select(p => new ArgInfo(p.Name, p, [])).ToArray());
-                    return new TypeEventInfo(name, type, orderId, retType, args);
+                    return new TypeEventInfo(name, symbol, orderId, retType, args);
                 }).ToArray());
 
             return new RemoteInterfaceTypeInfo(typeNamespace, typeName, adapterName, proxyName, props, methods, events);
