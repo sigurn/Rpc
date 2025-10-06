@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace Sigurn.Rpc;
 
-class ChannelProtocol : IProtocol
+public class ChannelProtocol : IProtocol
 {
     private readonly ImmutableArray<byte> _startMarker = [0xA5, 0xB6, 0xC7, 0xD8];
     private readonly ImmutableArray<byte> _version = [0x01, 0x00];

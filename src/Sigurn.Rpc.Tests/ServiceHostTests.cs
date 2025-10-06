@@ -273,7 +273,7 @@ public class ServiceHostTests
         IPacket packet;
         using (CancellationTokenSource cts = new CancellationTokenSource())
         {
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
             packet = await client1.ReceiveAsync(cts.Token);
         }
 
@@ -292,7 +292,7 @@ public class ServiceHostTests
 
         using (CancellationTokenSource cts = new CancellationTokenSource())
         {
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
             packet = await client2.ReceiveAsync(cts.Token);
         }
 
@@ -311,7 +311,7 @@ public class ServiceHostTests
 
         using (CancellationTokenSource cts = new CancellationTokenSource())
         {
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
             packet = await client3.ReceiveAsync(cts.Token);
         }
 

@@ -9,10 +9,10 @@
   <PropertyGroup>
     <BuildProject>false</BuildProject>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <MinVerDefaultPreReleaseIdentifiers>dev</MinVerDefaultPreReleaseIdentifiers>
-    <MinVerMinimumMajorMinor>99.99</MinVerMinimumMajorMinor>
+    <MinVerDefaultPreReleaseIdentifiers Condition="'$(MinVerDefaultPreReleaseIdentifiers)' == ''">dev</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerMinimumMajorMinor Condition="'$(MinVerMinimumMajorMinor)' == ''">99.99</MinVerMinimumMajorMinor>
   </PropertyGroup>
-
+  
   <ItemGroup>
     <ProjectReference Include="../Sigurn.Rpc.Generator/Sigurn.Rpc.Generator.csproj" PrivateAssets="all"/>
   </ItemGroup>

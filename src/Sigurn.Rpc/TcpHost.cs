@@ -28,6 +28,18 @@ public class TcpHost : IDisposable, IChannelHost
         _isOpened = false;
     }
 
+    public TcpHost(Func<IChannel, IChannel> channelfactory)
+        : this ()
+    {
+        _channelFactory = channelfactory;
+    }
+
+    public TcpHost(Func<IProtocol> protocolFactory)
+        : this ()
+    {
+        _protocolFactory = protocolFactory;
+    }
+
     public TcpHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelfactory)
         : this ()
     {
