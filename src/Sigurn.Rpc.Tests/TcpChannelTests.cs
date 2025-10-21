@@ -47,9 +47,11 @@ public class TcpChannelTests
 
         await clientChannel.OpenAsync(CancellationToken.None);
         Assert.Equal((IPEndPoint)socket.LocalEndPoint, clientChannel.RemoteEndPoint);
+        Assert.Equal(socket.LocalEndPoint.ToString(), ((IAddressableChannel)clientChannel).RemoteAddress);
         await clientChannel.CloseAsync(CancellationToken.None);
 
         Assert.Throws<InvalidOperationException>(() => clientChannel.RemoteEndPoint);
+        Assert.Equal(string.Empty, ((IAddressableChannel)clientChannel).RemoteAddress);
 
         await serverTask;
 

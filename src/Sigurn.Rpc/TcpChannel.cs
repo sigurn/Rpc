@@ -3,7 +3,7 @@ using System.Net.Sockets;
 
 namespace Sigurn.Rpc;
 
-public class TcpChannel : BaseChannel
+public class TcpChannel : BaseChannel, IAddressableChannel
 {
     private readonly IPEndPoint _endPoint;
     private Socket? _socket;
@@ -59,6 +59,24 @@ public class TcpChannel : BaseChannel
         }
     }
 
+    string IAddressableChannel.LocalAddress
+    {
+        get
+        {
+            lock (_lock)
+                return _endPoint.ToString();
+        }
+    }
+    
+    string IAddressableChannel.RemoteAddress
+    {
+        get
+        {
+            lock (_lock)
+                return _socket?.RemoteEndPoint?.ToString() ?? string.Empty;
+        }
+    }
+    
     protected override async Task InternalOpenAsync(CancellationToken cancellationToken)
     {
         var socket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);

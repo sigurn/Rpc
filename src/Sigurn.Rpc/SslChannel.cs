@@ -6,7 +6,7 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace Sigurn.Rpc;
 
-public class SslChannel : BaseChannel, IAutenticatedChannel
+public class SslChannel : BaseChannel, IAutenticatedChannel, IAddressableChannel
 {
     private readonly IPEndPoint _endPoint;
     private readonly X509Certificate? _certificate;
@@ -103,6 +103,24 @@ public class SslChannel : BaseChannel, IAutenticatedChannel
         {
             lock (_lock)
                 return (IPEndPoint)(_socket?.RemoteEndPoint ?? throw new InvalidOperationException("Remote endpoint is not available"));
+        }
+    }
+
+    string IAddressableChannel.LocalAddress
+    {
+        get
+        {
+            lock (_lock)
+                return _endPoint.ToString();
+        }
+    }
+    
+    string IAddressableChannel.RemoteAddress
+    {
+        get
+        {
+            lock (_lock)
+                return _socket?.RemoteEndPoint?.ToString() ?? string.Empty;
         }
     }
     
