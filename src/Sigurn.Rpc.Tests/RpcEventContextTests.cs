@@ -67,6 +67,11 @@ public class RpcEventContextTests
             throw new NotImplementedException();
         }
 
+        public Task MethodThrowAsync(CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
         public void RaiseTestEventNoSession()
         {
             TestEvent?.Invoke(this, EventArgs.Empty);

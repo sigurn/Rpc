@@ -84,7 +84,9 @@ public interface ITestService
     int Property1 { get; set; }
 
     event EventHandler TestEvent;
-}
+   Task MethodThrowAsync(CancellationToken cancellationToken);
+
+ }
 
 class TestServiceAdapter : InterfaceAdapter
 {
@@ -179,6 +181,14 @@ class TestServiceAdapter : InterfaceAdapter
             if (handler is null)
                 throw new NullReferenceException("Handler cannot be null");
             _instance.Unsubscribe(handler);
+        }
+        else if (methodId == 10)
+        {
+            if (args is null || args.Count != 0)
+                throw new ArgumentException("Invalid number of arguments");
+
+            await _instance.MethodThrowAsync(cancellationToken);
+            return (Result: null, Args: null);
         }
 
         return (Result: null, Args: null);
@@ -338,6 +348,11 @@ class TestServiceProxy : InterfaceProxy, ITestService
         InvokeMethod(9, [ToBytes(handler)], false);
     }
 
+    async Task ITestService.MethodThrowAsync(CancellationToken cancellationToken)
+    {
+        await InvokeMethodAsync(10, [], false, cancellationToken);
+    }
+    
     int ITestService.Property1
     {
         get => GetProperty<int>(1);
@@ -459,6 +474,12 @@ class TestService : ITestService, IDisposable
 
         lock (_subscriptions)
             _subscriptions.Remove(handler);
+    }
+
+    Task ITestService.MethodThrowAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromException(new NotImplementedException());
     }
 
     private int _property1;

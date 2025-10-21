@@ -88,6 +88,24 @@ public class SslChannel : BaseChannel, IAutenticatedChannel
         _socket = null;
     }
 
+    public IPEndPoint LocalEndPoint
+    {
+        get
+        {
+            lock (_lock)
+                return _endPoint;
+        }
+    }
+
+    public IPEndPoint RemoteEndPoint
+    {
+        get
+        {
+            lock (_lock)
+                return (IPEndPoint)(_socket?.RemoteEndPoint ?? throw new InvalidOperationException("Remote endpoint is not available"));
+        }
+    }
+    
     public string? ServerName
     {
         get

@@ -1038,7 +1038,7 @@ public class RpcClientTests
         await client1.OpenAsync(cancellationTokenSource.Token);
 
         var testService1 = await client1.GetService<ITestService>(cancellationTokenSource.Token);
- 
+
         using RpcClient client2 = new RpcClient(async cancellationToken =>
         {
             var channel = new TcpChannel(host.EndPoint);
@@ -1067,5 +1067,35 @@ public class RpcClientTests
 
         Assert.True(destroyEvent.WaitOne(TimeSpan.FromSeconds(2)));
         Assert.Equal("Created, Add 3, 5, Add 5, 7, Add 15, 10, Disposed", string.Join(", ", log.ToImmutableArrayWithLock()));
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task CloseClientAfterExceptionOnServer()
+    {
+        List<string> log = new();
+        using ManualResetEvent destroyEvent = new ManualResetEvent(false);
+        using TcpHost host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        ServiceHost serviceHost = new ServiceHost(host);
+        serviceHost.RegisterSerive<ITestService>(ShareWithin.Host, () => new TestService(log, destroyEvent));
+        serviceHost.Start();
+
+        using CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+        cancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(5));
+
+        using RpcClient client = new RpcClient(async cancellationToken =>
+        {
+            var channel = new TcpChannel(host.EndPoint);
+            await channel.OpenAsync(cancellationToken);
+            return channel;
+        });
+
+        await client.OpenAsync(cancellationTokenSource.Token);
+
+        var testService = await client.GetService<ITestService>(cancellationTokenSource.Token);
+
+        await Assert.ThrowsAsync<RpcServerException>(() => testService.MethodThrowAsync(cancellationTokenSource.Token));
+
+        client.Dispose();
     }
 }

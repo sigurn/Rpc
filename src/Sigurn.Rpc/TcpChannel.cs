@@ -15,7 +15,7 @@ public class TcpChannel : BaseChannel
         ArgumentNullException.ThrowIfNull(protocol);
 
         if (socket.RemoteEndPoint is not IPEndPoint ipep)
-            throw new ArgumentException("The channel does supports TCP/IP sockets only");
+            throw new ArgumentException("The channel supports TCP/IP sockets only");
 
         _endPoint = ipep;
         _socket = socket;
@@ -41,13 +41,31 @@ public class TcpChannel : BaseChannel
         _socket = null;
     }
 
+    public IPEndPoint LocalEndPoint
+    {
+        get
+        {
+            lock (_lock)
+                return _endPoint;
+        }
+    }
+
+    public IPEndPoint RemoteEndPoint
+    {
+        get
+        {
+            lock (_lock)
+                return (IPEndPoint)(_socket?.RemoteEndPoint ?? throw new InvalidOperationException("Remote endpoint is not available"));
+        }
+    }
+
     protected override async Task InternalOpenAsync(CancellationToken cancellationToken)
     {
         var socket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
         await socket.ConnectAsync(_endPoint, cancellationToken);
 
-        lock(_lock)
+        lock (_lock)
             _socket = socket;
     }
 

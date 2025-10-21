@@ -46,7 +46,10 @@ public class TcpChannelTests
         clientChannel.Faulted += (s,e) => historyClient.Add("Faulted");
 
         await clientChannel.OpenAsync(CancellationToken.None);
+        Assert.Equal((IPEndPoint)socket.LocalEndPoint, clientChannel.RemoteEndPoint);
         await clientChannel.CloseAsync(CancellationToken.None);
+
+        Assert.Throws<InvalidOperationException>(() => clientChannel.RemoteEndPoint);
 
         await serverTask;
 
