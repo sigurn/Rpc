@@ -94,7 +94,7 @@ public class RpcSessionTests
                 _sessions.Remove(session);
             _sessionChangedEvent.Set();
         }
-        public async Task MethodThrowAsync(CancellationToken cancellationToken)
+        public Task MethodThrowAsync(CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
         }

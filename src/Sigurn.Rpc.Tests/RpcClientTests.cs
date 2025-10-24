@@ -1,5 +1,6 @@
 using System.Net;
 using Moq;
+using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc.Tests;
 
@@ -201,6 +202,8 @@ public class RpcClientTests
 
         Assert.NotNull(testService);
         Assert.IsAssignableFrom<IDisposable>(testService);
+        Assert.True(InterfaceProxy.IsInterfaceProxy(testService));
+        Assert.NotNull(InterfaceProxy.GetChannel(testService));
 
         Assert.Equal<IEnumerable<string>>(["Created"], log.ToImmutableArrayWithLock());
 

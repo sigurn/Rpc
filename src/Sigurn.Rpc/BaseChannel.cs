@@ -1,11 +1,26 @@
+using System.Runtime.CompilerServices;
 using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
+static class TaskHelpers
+{
+    public static Task WaitNoThrow(this Task task)
+    {
+        return task.ContinueWith(_ => { });
+    }
+}
+
 public abstract class BaseChannel : IChannel, IDisposable
 {
-    protected readonly object _lock = new ();
+    protected readonly object _lock = new();
     private volatile bool _isDisposed = false;
+
+    private CancellationTokenSource? _recevieCancellationSource = null;
+    private Task<IPacket>? _recevieTask = null;
+
+    private CancellationTokenSource? _sendCancellationSource = null;
+    private Task<IPacket>? _sendTask = null;
 
     private CancellationTokenSource? _openCancellationSource;
     private Task? _openTask;
@@ -16,7 +31,7 @@ public abstract class BaseChannel : IChannel, IDisposable
 
     public void Dispose()
     {
-        lock(_lock)
+        lock (_lock)
         {
             if (_isDisposed) return;
             _isDisposed = true;
@@ -30,29 +45,29 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
         get
         {
-            lock(_lock)
+            lock (_lock)
                 return _state;
         }
 
         set
         {
-            lock(_lock)
+            lock (_lock)
                 _state = value;
         }
     }
 
     private object? _boundObject = null;
     public object? BoundObject
-    { 
+    {
         get
         {
-            lock(_lock)
+            lock (_lock)
                 return _boundObject;
         }
 
         set
         {
-            lock(_lock)
+            lock (_lock)
                 _boundObject = value;
         }
     }
@@ -87,7 +102,7 @@ public abstract class BaseChannel : IChannel, IDisposable
             }
         }
 
-        lock(_lock)
+        lock (_lock)
         {
             if (_state == ChannelState.Closed || _state == ChannelState.Closing)
                 return;
@@ -96,19 +111,39 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
 
         try
-        {            
+        {
             RaiseClosing();
+
+            Task? receiveTask;
+            Task? sendTask;
+
+            lock (_lock)
+            {
+                receiveTask = _recevieTask;
+                if (_recevieCancellationSource is not null && !_recevieCancellationSource.IsCancellationRequested)
+                    _recevieCancellationSource.Cancel();
+
+                sendTask = _sendTask;
+                if (_sendCancellationSource is not null && !_sendCancellationSource.IsCancellationRequested)
+                    _sendCancellationSource.Cancel();
+            }
+
+            if (receiveTask is not null)
+                await receiveTask.WaitNoThrow();
+
+            if (sendTask is not null)
+                await sendTask.WaitNoThrow();
 
             await InternalCloseAsync(cancellationToken);
 
-            lock(_lock)
+            lock (_lock)
                 _state = ChannelState.Closed;
 
-            RaiseClosed( );
+            RaiseClosed();
         }
         catch
         {
-            GoToFaultedState( );
+            GoToFaultedState();
             throw;
         }
     }
@@ -120,7 +155,7 @@ public abstract class BaseChannel : IChannel, IDisposable
         using ManualResetEvent openEvent = new ManualResetEvent(false);
         Task task;
         CancellationTokenSource openCancellationSource;
-        lock(_lock)
+        lock (_lock)
         {
             if (_state == ChannelState.Opened || _state == ChannelState.Opening)
                 return;
@@ -140,7 +175,7 @@ public abstract class BaseChannel : IChannel, IDisposable
             openEvent.Set();
             await task;
 
-            lock(_lock)
+            lock (_lock)
             {
                 _openTask = null;
                 _openCancellationSource = null;
@@ -157,6 +192,12 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
         finally
         {
+            lock (_lock)
+            {
+                _openTask = null;
+                _openCancellationSource = null;
+            }
+
             task.Dispose();
             openCancellationSource.Dispose();
         }
@@ -164,20 +205,65 @@ public abstract class BaseChannel : IChannel, IDisposable
 
     public async Task<IPacket> ReceiveAsync(CancellationToken cancellationToken)
     {
-        lock(_lock)
+        Task<IPacket> task;
+        lock (_lock)
+        {
             if (_state != ChannelState.Opened)
                 throw new InvalidOperationException("The channel is not opened.");
 
-        return await InternalReceiveAsync(cancellationToken);
+            if (_recevieTask is not null)
+                throw new InvalidOperationException("The receive operation is already running. Cannot run conncurrent receive operations.");
+
+            _recevieCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            task = InternalReceiveAsync(_recevieCancellationSource.Token);
+            _recevieTask = task;
+        }
+
+        try
+        {
+            return await task;
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                _recevieTask = null;
+                _recevieCancellationSource?.Dispose();
+                _recevieCancellationSource = null;
+            }            
+        }
     }
 
     public async Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
     {
-        lock(_lock)
+        Task<IPacket> task;
+        lock (_lock)
+        {
             if (_state != ChannelState.Opened)
                 throw new InvalidOperationException("The channel is not opened.");
 
-        return await InternalSendAsync(packet, cancellationToken);
+            if (_sendTask is not null)
+                throw new InvalidOperationException("The send operation is already running. Cannot run conncurrent send operations.");
+
+            _sendCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            task = InternalSendAsync(packet, _sendCancellationSource.Token);
+            _sendTask = task;
+        }
+
+
+        try
+        {
+            return await task;
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                _sendTask = null;
+                _sendCancellationSource?.Dispose();
+                _sendCancellationSource = null;
+            }            
+        }
     }
 
     private EventHandler? _opening;
@@ -185,12 +271,12 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
         add
         {
-            lock(_lock)
+            lock (_lock)
                 _opening += value;
         }
         remove
         {
-            lock(_lock)
+            lock (_lock)
                 _opening -= value;
         }
     }
@@ -200,13 +286,13 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
         add
         {
-            lock(_lock)
+            lock (_lock)
                 _opened += value;
         }
 
         remove
         {
-            lock(_lock)
+            lock (_lock)
                 _opened -= value;
         }
     }
@@ -216,13 +302,13 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
         add
         {
-            lock(_lock)
+            lock (_lock)
                 _closing += value;
         }
 
         remove
         {
-            lock(_lock)
+            lock (_lock)
                 _closing -= value;
         }
     }
@@ -232,13 +318,13 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
         add
         {
-            lock(_lock)
+            lock (_lock)
                 _closed += value;
         }
 
         remove
         {
-            lock(_lock)
+            lock (_lock)
                 _closed -= value;
         }
     }
@@ -248,13 +334,13 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
         add
         {
-            lock(_lock)
+            lock (_lock)
                 _faulted += value;
         }
 
         remove
         {
-            lock(_lock)
+            lock (_lock)
                 _faulted -= value;
         }
     }
@@ -269,8 +355,8 @@ public abstract class BaseChannel : IChannel, IDisposable
         OnOpening();
 
         EventHandler? opening;
-        
-        lock(_lock)
+
+        lock (_lock)
             opening = _opening;
 
         if (opening is not null)
@@ -282,8 +368,8 @@ public abstract class BaseChannel : IChannel, IDisposable
         OnOpened();
 
         EventHandler? opened;
-        
-        lock(_lock)
+
+        lock (_lock)
             opened = _opened;
 
         if (opened is not null)
@@ -295,8 +381,8 @@ public abstract class BaseChannel : IChannel, IDisposable
         OnClosing();
 
         EventHandler? handler;
-        
-        lock(_lock)
+
+        lock (_lock)
             handler = _closing;
 
         if (handler is not null)
@@ -308,8 +394,8 @@ public abstract class BaseChannel : IChannel, IDisposable
         OnClosed();
 
         EventHandler? handler;
-        
-        lock(_lock)
+
+        lock (_lock)
             handler = _closed;
 
         if (handler is not null)
@@ -321,21 +407,21 @@ public abstract class BaseChannel : IChannel, IDisposable
         OnFaulted();
 
         EventHandler? handler;
-        
-        lock(_lock)
+
+        lock (_lock)
             handler = _faulted;
 
         if (handler is not null)
             handler(this, EventArgs.Empty);
     }
 
-    protected void CheckFaulted( )
+    protected void CheckFaulted()
     {
         if (State == ChannelState.Faulted)
             throw new Exception("The channel is in faulted state");
     }
 
-    protected void GoToFaultedState( )
+    protected void GoToFaultedState()
     {
         lock (_lock)
         {

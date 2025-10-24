@@ -99,6 +99,19 @@ public class InterfaceProxy : IDisposable
         }
     }
 
+    public static bool IsInterfaceProxy<T>(T obj)
+    {
+        return obj is InterfaceProxy;
+    }
+
+    public static IChannel? GetChannel<T>(T obj)
+    {
+        var ip = obj as InterfaceProxy;
+        if (ip is null) return null;
+        if (ip.CallTarget is ServiceInstance si) return si.Handler.Channel;
+        return null;
+    }
+
     private readonly Guid _instanceId;
     private readonly Dictionary<int, int> _events = new();
 

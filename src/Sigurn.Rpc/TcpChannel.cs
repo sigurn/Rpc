@@ -98,6 +98,7 @@ public class TcpChannel : BaseChannel, IAddressableChannel
 
         if (socket is null) return Task.CompletedTask;
 
+        socket.Shutdown(SocketShutdown.Both);
         socket.Close();
         socket.Dispose();
 
@@ -174,10 +175,11 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         {
             _protocol.EndSending();
 
+            GoToFaultedState();
+
             if (ex.SocketErrorCode == SocketError.OperationAborted)
                 throw new OperationCanceledException("Send operation was cancelled", ex);
 
-            GoToFaultedState();
             throw;
         }
         catch
@@ -197,7 +199,7 @@ public class TcpChannel : BaseChannel, IAddressableChannel
 
         while(pos < size)
         {
-            var len = await socket.ReceiveAsync(new Memory<byte>(buf, pos, size - pos), SocketFlags.None, cancellationToken);
+            var len = await socket.ReceiveAsync(new Memory<byte>(buf, pos, size - pos), SocketFlags.None, cancellationToken).ConfigureAwait(false);
             if (len == 0)
                 throw new SocketException((int)SocketError.ConnectionAborted);
 
@@ -212,6 +214,6 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         int pos = 0;
 
         while(pos < data.Length)
-            pos += await socket.SendAsync( new ReadOnlyMemory<byte>(data, pos, data.Length - pos), SocketFlags.None, cancellationToken);
+            pos += await socket.SendAsync( new ReadOnlyMemory<byte>(data, pos, data.Length - pos), SocketFlags.None, cancellationToken).ConfigureAwait(false);
     }
 }

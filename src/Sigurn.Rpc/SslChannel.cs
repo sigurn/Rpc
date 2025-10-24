@@ -199,6 +199,7 @@ public class SslChannel : BaseChannel, IAutenticatedChannel, IAddressableChannel
 
         if (socket is not null)
         {
+            socket.Shutdown(SocketShutdown.Both);
             socket.Close();
             socket.Dispose();
         }

@@ -1,6 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
+using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc.Tests;
 
@@ -29,31 +29,31 @@ public class RestorableChannelTests
         Assert.Null(channel.BoundObject);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task CannotOpenChannelOneFactory()
     {
         RestorableChannel channel = new RestorableChannel([FakeFactory]);
         var ex = await Assert.ThrowsAsync<AggregateException>(() => channel.OpenAsync(CancellationToken.None));
         Assert.Equal(ChannelState.Faulted, channel.State);
-        Assert.StartsWith("None of the channel factories was able get connected to the server", ex.Message);
+        Assert.StartsWith("None of the channel factories was able to get connected to the server", ex.Message);
         Assert.Single(ex.InnerExceptions);
         var innerEx = ex.InnerExceptions[0];
-        Assert.IsType<NotImplementedException>(innerEx);        
+        Assert.IsType<NotImplementedException>(innerEx);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task CannotOpenChannelSeveralFactories()
     {
         RestorableChannel channel = new RestorableChannel([FakeFactory, FakeFactory, FakeFactory]);
 
         var ex = await Assert.ThrowsAsync<AggregateException>(() => channel.OpenAsync(CancellationToken.None));
         Assert.Equal(ChannelState.Faulted, channel.State);
-        Assert.StartsWith("None of the channel factories was able get connected to the server", ex.Message);
+        Assert.StartsWith("None of the channel factories was able to get connected to the server", ex.Message);
 
         Assert.Equal(3, ex.InnerExceptions.Count);
-        Assert.IsType<NotImplementedException>(ex.InnerExceptions[0]);        
-        Assert.IsType<NotImplementedException>(ex.InnerExceptions[1]);        
-        Assert.IsType<NotImplementedException>(ex.InnerExceptions[2]);        
+        Assert.IsType<NotImplementedException>(ex.InnerExceptions[0]);
+        Assert.IsType<NotImplementedException>(ex.InnerExceptions[1]);
+        Assert.IsType<NotImplementedException>(ex.InnerExceptions[2]);
     }
 
     private Task<IChannel> NullFactory(CancellationToken cancellationToken)
@@ -63,27 +63,27 @@ public class RestorableChannelTests
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task CannotOpenChannelFactoryReturnsNull()
     {
         RestorableChannel channel = new RestorableChannel([NullFactory]);
 
         var ex = await Assert.ThrowsAsync<Exception>(() => channel.OpenAsync(CancellationToken.None));
         Assert.Equal(ChannelState.Faulted, channel.State);
-        Assert.Equal("None of the channel factories was able get connected to the server", ex.Message);
+        Assert.Equal("None of the channel factories was able to get connected to the server", ex.Message);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task CannotOpenChannelSeveralFactoriesReturnNull()
     {
         RestorableChannel channel = new RestorableChannel([NullFactory, NullFactory, NullFactory]);
 
         var ex = await Assert.ThrowsAsync<Exception>(() => channel.OpenAsync(CancellationToken.None));
         Assert.Equal(ChannelState.Faulted, channel.State);
-        Assert.StartsWith("None of the channel factories was able get connected to the server", ex.Message);
+        Assert.StartsWith("None of the channel factories was able to get connected to the server", ex.Message);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task CannotOpenChannelAllFactoriesAreNull()
     {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
@@ -92,10 +92,10 @@ public class RestorableChannelTests
 
         var ex = await Assert.ThrowsAsync<Exception>(() => channel.OpenAsync(CancellationToken.None));
         Assert.Equal(ChannelState.Faulted, channel.State);
-        Assert.StartsWith("None of the channel factories was able get connected to the server", ex.Message);
+        Assert.StartsWith("None of the channel factories was able to get connected to the server", ex.Message);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task OpenAndCloseChannelSuccessfully()
     {
         using TcpHost host = new TcpHost();
@@ -112,11 +112,11 @@ public class RestorableChannelTests
         });
         channel.AutoReopen = false;
 
-        channel.Opening += (s,e) => log.AddWithLock("Opening");
-        channel.Opened += (s,e) => log.AddWithLock("Opened");
-        channel.Closing += (s,e) => log.AddWithLock("Closing");
-        channel.Closed += (s,e) => log.AddWithLock("Closed");
-        channel.Faulted += (s,e) => log.AddWithLock("Faulted");
+        channel.Opening += (s, e) => log.AddWithLock("Opening");
+        channel.Opened += (s, e) => log.AddWithLock("Opened");
+        channel.Closing += (s, e) => log.AddWithLock("Closing");
+        channel.Closed += (s, e) => log.AddWithLock("Closed");
+        channel.Faulted += (s, e) => log.AddWithLock("Faulted");
 
         await channel.OpenAsync(CancellationToken.None);
         Assert.Equal(ChannelState.Opened, channel.State);
@@ -130,7 +130,7 @@ public class RestorableChannelTests
         serviceHost.Stop();
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task OpenAndCloseChannelSuccessfullyFromTheSecondTry()
     {
         using TcpHost host = new TcpHost();
@@ -147,11 +147,11 @@ public class RestorableChannelTests
         });
         channel.AutoReopen = false;
 
-        channel.Opening += (s,e) => log.AddWithLock("Opening");
-        channel.Opened += (s,e) => log.AddWithLock("Opened");
-        channel.Closing += (s,e) => log.AddWithLock("Closing");
-        channel.Closed += (s,e) => log.AddWithLock("Closed");
-        channel.Faulted += (s,e) => log.AddWithLock("Faulted");
+        channel.Opening += (s, e) => log.AddWithLock("Opening");
+        channel.Opened += (s, e) => log.AddWithLock("Opened");
+        channel.Closing += (s, e) => log.AddWithLock("Closing");
+        channel.Closed += (s, e) => log.AddWithLock("Closed");
+        channel.Faulted += (s, e) => log.AddWithLock("Faulted");
 
         await channel.OpenAsync(CancellationToken.None);
         Assert.Equal(ChannelState.Opened, channel.State);
@@ -165,7 +165,7 @@ public class RestorableChannelTests
         serviceHost.Stop();
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task ConnectionTerminatedByServerNoAutoReopen()
     {
         using TcpHost host = new TcpHost();
@@ -183,11 +183,11 @@ public class RestorableChannelTests
         channel.AutoReopen = false;
 
         using ManualResetEvent faultedEvent = new ManualResetEvent(false);
-        channel.Opening += (s,e) => log.AddWithLock("Opening");
-        channel.Opened += (s,e) => log.AddWithLock("Opened");
-        channel.Closing += (s,e) => log.AddWithLock("Closing");
-        channel.Closed += (s,e) => log.AddWithLock("Closed");
-        channel.Faulted += (s,e) =>
+        channel.Opening += (s, e) => log.AddWithLock("Opening");
+        channel.Opened += (s, e) => log.AddWithLock("Opened");
+        channel.Closing += (s, e) => log.AddWithLock("Closing");
+        channel.Closed += (s, e) => log.AddWithLock("Closed");
+        channel.Faulted += (s, e) =>
         {
             log.AddWithLock("Faulted");
             faultedEvent.Set();
@@ -201,9 +201,9 @@ public class RestorableChannelTests
         serviceHost.Stop();
         try
         {
-            await channel.SendAsync(IPacket.Create(Array.Empty<byte>()), CancellationToken.None);
+            await channel.ReceiveAsync(CancellationToken.None);
         }
-        catch(AggregateException)
+        catch (Exception)
         {
         }
         Assert.True(faultedEvent.WaitOne(TimeSpan.FromSeconds(2)));
@@ -214,7 +214,7 @@ public class RestorableChannelTests
         Assert.Equal<IEnumerable<string>>(["Opening", "Opened", "Faulted", "Closing", "Closed"], log.ToImmutableArrayWithLock());
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task ConnectionTerminatedByServerNoAutoReopenButOpenManuallyAgain()
     {
         using TcpHost host = new TcpHost();
@@ -232,11 +232,11 @@ public class RestorableChannelTests
         channel.AutoReopen = false;
 
         using ManualResetEvent faultedEvent = new ManualResetEvent(false);
-        channel.Opening += (s,e) => log.AddWithLock("Opening");
-        channel.Opened += (s,e) => log.AddWithLock("Opened");
-        channel.Closing += (s,e) => log.AddWithLock("Closing");
-        channel.Closed += (s,e) => log.AddWithLock("Closed");
-        channel.Faulted += (s,e) =>
+        channel.Opening += (s, e) => log.AddWithLock("Opening");
+        channel.Opened += (s, e) => log.AddWithLock("Opened");
+        channel.Closing += (s, e) => log.AddWithLock("Closing");
+        channel.Closed += (s, e) => log.AddWithLock("Closed");
+        channel.Faulted += (s, e) =>
         {
             log.AddWithLock("Faulted");
             faultedEvent.Set();
@@ -248,8 +248,10 @@ public class RestorableChannelTests
 
         faultedEvent.Reset();
         serviceHost.Stop();
-        await Assert.ThrowsAsync<AggregateException>(() => channel.SendAsync(IPacket.Create(Array.Empty<byte>()), CancellationToken.None));
-        Assert.True(faultedEvent.WaitOne(TimeSpan.FromSeconds(1)));
+
+        await Assert.ThrowsAsync<SocketException>(() => channel.ReceiveAsync(CancellationToken.None));
+
+        Assert.True(await faultedEvent.WaitOneAsync(TimeSpan.FromSeconds(1), CancellationToken.None));
         Assert.Equal(ChannelState.Faulted, channel.State);
         Assert.Equal<IEnumerable<string>>(["Opening", "Opened", "Faulted"], log.ToImmutableArrayWithLock());
 
@@ -259,5 +261,46 @@ public class RestorableChannelTests
 
         await channel.CloseAsync(CancellationToken.None);
         Assert.Equal<IEnumerable<string>>(["Opening", "Opened", "Faulted", "Opening", "Opened", "Closing", "Closed"], log.ToImmutableArrayWithLock());
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task ReadOperationIsCancelledOnChannelClose()
+    {
+        using TcpHost host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        ServiceHost serviceHost = new ServiceHost(host);
+        serviceHost.Start();
+
+        var log = new List<string>();
+        RestorableChannel channel = new RestorableChannel(async (ct) =>
+        {
+            var channel = new TcpChannel(host.EndPoint);
+            await channel.OpenAsync(ct);
+            return channel;
+        });
+        channel.AutoReopen = true;
+
+        using ManualResetEvent faultedEvent = new ManualResetEvent(false);
+        channel.Opening += (s, e) => log.AddWithLock("Opening");
+        channel.Opened += (s, e) => log.AddWithLock("Opened");
+        channel.Closing += (s, e) => log.AddWithLock("Closing");
+        channel.Closed += (s, e) => log.AddWithLock("Closed");
+        channel.Faulted += (s, e) =>
+        {
+            log.AddWithLock("Faulted");
+            faultedEvent.Set();
+        };
+
+        await channel.OpenAsync(CancellationToken.None);
+        Assert.Equal(ChannelState.Opened, channel.State);
+        Assert.Equal<IEnumerable<string>>(["Opening", "Opened"], log.ToImmutableArrayWithLock());
+
+        var readTask = channel.ReceiveAsync(CancellationToken.None);
+
+        await channel.CloseAsync(CancellationToken.None);
+        Assert.Equal<IEnumerable<string>>(["Opening", "Opened", "Closing", "Closed"], log.ToImmutableArrayWithLock());
+
+        Assert.True(readTask.IsCompleted);
+        serviceHost.Stop();
     }
 }

@@ -27,6 +27,8 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
 
     public Guid InstanceId { get; }
 
+    internal RpcHandler Handler => _handler;
+
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(int methodId, IReadOnlyList<byte[]>? args, bool oneWay, CancellationToken cancellationToken)
     {
         return await _handler.InvokeMethodAsync(InstanceId, methodId, args ?? [], oneWay, cancellationToken);

@@ -1,6 +1,6 @@
 namespace Sigurn.Rpc;
 
-interface IChainedChannel : IChannel
+public interface IChainedChannel : IChannel
 {
     IChannel BaseChannel { get; }
 }

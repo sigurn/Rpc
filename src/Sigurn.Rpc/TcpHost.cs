@@ -124,8 +124,8 @@ public class TcpHost : IDisposable, IChannelHost
 
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    socket?.Close();
-                    socket?.Dispose();
+                    socket.Close();
+                    socket.Dispose();
                     return;
                 }
 
@@ -171,6 +171,8 @@ public class TcpHost : IDisposable, IChannelHost
             if (cancellationTokenSource is not null)
                 cancellationTokenSource.Cancel();
 
+            acceptTask?.Wait();
+
             IChannel[] channels;
             lock(_channels)
             {
@@ -184,7 +186,6 @@ public class TcpHost : IDisposable, IChannelHost
                 .ToArray();
             
             Task.WaitAll(tasks);
-            acceptTask?.Wait();
 
             foreach(var d in channels.Where(x => x is IDisposable).Select(x => (IDisposable)x))
                 d.Dispose();

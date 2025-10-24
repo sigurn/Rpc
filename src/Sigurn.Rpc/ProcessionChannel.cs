@@ -78,6 +78,9 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
         }
 
         OnOpened(exception, cancellationToken);
+
+        if (exception is not null)
+            throw exception;
     }
 
     public async Task CloseAsync(CancellationToken cancellationToken)
@@ -85,7 +88,7 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
         Exception? exception = null;
 
         OnClosing(cancellationToken);
-        
+
         try
         {
             await _channel.CloseAsync(cancellationToken);
@@ -96,6 +99,9 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
         }
 
         OnClosed(exception, cancellationToken);
+
+        if (exception is not null)
+            throw exception;
     }
 
     public async Task<IPacket> ReceiveAsync(CancellationToken cancellationToken)

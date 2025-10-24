@@ -5,6 +5,7 @@ sealed class QueueChannel : IChainedChannel, IDisposable
     record class SendWorkItem(TaskCompletionSource<IPacket> TaskSource, IPacket Packet, CancellationToken CancellationToken);
 
     private readonly IChannel _channel;
+    private readonly SemaphoreSlim _sendSemaphore = new SemaphoreSlim(1,1);
     private readonly Queue<SendWorkItem> _sendQueue = [];
     private volatile bool _isSending;
 
@@ -18,23 +19,32 @@ sealed class QueueChannel : IChainedChannel, IDisposable
         _channel.Opening += (s, e) => Opening?.Invoke(this, e);
         _channel.Opened += (s, e) => Opened?.Invoke(this, e);
         _channel.Closing += (s, e) => Closing?.Invoke(this, e);
-        _channel.Closed += (s, e) => 
+        _channel.Closed += (s, e) =>
         {
-            IReadOnlyList<SendWorkItem> items;
-            lock(_sendQueue)
-            {
-                items = _sendQueue.ToList();
-                _sendQueue.Clear();
-            }
-
-            foreach(var swi in items)
-                swi.TaskSource.SetCanceled();
-
+            CancelAllOperations();
             Closed?.Invoke(this, e);
         };
-        _channel.Faulted += (s, e) => Faulted?.Invoke(this, e);
+
+        _channel.Faulted += (s, e) =>
+        {
+            CancelAllOperations();
+            Faulted?.Invoke(this, e);
+        };
     }
 
+    private void CancelAllOperations()
+    {
+        IReadOnlyList<SendWorkItem> items;
+        lock(_sendQueue)
+        {
+            items = _sendQueue.ToList();
+            _sendQueue.Clear();
+        }
+
+        foreach(var swi in items)
+            swi.TaskSource.TrySetCanceled();
+    }
+    
     public void Dispose()
     {
         if (_channel is IDisposable d)
@@ -84,7 +94,11 @@ sealed class QueueChannel : IChainedChannel, IDisposable
 
     public Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
     {
-        TaskCompletionSource<IPacket> tcs = new TaskCompletionSource<IPacket>();
+        if (_channel.State != ChannelState.Opened)
+            throw new InvalidOperationException("The channel is not opened.");
+
+        TaskCompletionSource<IPacket> tcs = new TaskCompletionSource<IPacket>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         lock(_sendQueue)
         {
             if (_sendQueue.Count != 0 || _isSending)
@@ -104,16 +118,22 @@ sealed class QueueChannel : IChainedChannel, IDisposable
     private void SendCompleteionHandler(Task<IPacket> task, TaskCompletionSource<IPacket> tcs)
     {
         if (task.IsCanceled)
-            tcs.SetCanceled();
+        {
+            tcs.TrySetCanceled();
+        }
         else if (task.IsFaulted)
-            tcs.SetException(task.Exception);
+        {
+            tcs.TrySetException(task.Exception);
+        }
         else
-            tcs.SetResult(task.Result);
+        {
+            tcs.TrySetResult(task.Result);
+        }
 
         if (_channel.State != ChannelState.Opened) return;
-        
+
         SendWorkItem? swi;
-        lock(_sendQueue)
+        lock (_sendQueue)
         {
             if (!_sendQueue.TryDequeue(out swi))
             {

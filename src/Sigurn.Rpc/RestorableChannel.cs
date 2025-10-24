@@ -273,7 +273,7 @@ public class RestorableChannel : IChannel
         return channel.ReceiveAsync(cancellationToken);
     }
 
-    public Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
+    public async Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
     {
         IChannel? channel;
         lock(_lock)
@@ -286,7 +286,7 @@ public class RestorableChannel : IChannel
         if (channel is null)
             throw new InvalidOperationException("There is no connection");
 
-        return channel.SendAsync(packet, cancellationToken);
+        return await channel.SendAsync(packet, cancellationToken);
     }
 
     private EventHandler? _opening;
@@ -463,7 +463,7 @@ public class RestorableChannel : IChannel
         return await ConnectToServerAsync(factories, cancellationToken);
     }
 
-    private const string _cannotConnectMessage = "None of the channel factories was able get connected to the server";
+    private const string _cannotConnectMessage = "None of the channel factories was able to get connected to the server";
     private async Task<IChannel> ConnectToServerAsync (IEnumerator<Func<CancellationToken, Task<IChannel>>> factories, CancellationToken cancellationToken)
     {
         List<Exception> exceptions = [];
