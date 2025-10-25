@@ -9,7 +9,9 @@ public class AesChannelTests
     [Fact]
     public void CannotCreateInstanceWithNullChannel()
     {
+#pragma warning disable CS8625
         Assert.Throws<ArgumentNullException>(() => new AesChannel(null));
+#pragma warning restore CS8625
     }
 
     [Fact]

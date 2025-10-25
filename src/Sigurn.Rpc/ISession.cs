@@ -2,6 +2,7 @@ namespace Sigurn.Rpc;
 
 public interface ISession
 {
+    public static ISession? Current => Session.Current;
     Guid Id { get; }
 
     IChannel Channel { get; }
