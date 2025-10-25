@@ -6,6 +6,25 @@ namespace Sigurn.Rpc.Channels;
 
 public class AesChannel : ProcessionChannel
 {
+    private static readonly AsyncLocal<bool?> _isEncryped = new AsyncLocal<bool?>();
+
+    public static IDisposable SetEncryptionScope(bool isEncrypted)
+    {
+        var oldIsEncrypted = _isEncryped.Value;
+        _isEncryped.Value = isEncrypted;
+        return Disposable.Create(() => _isEncryped.Value = oldIsEncrypted);        
+    }
+
+    private static bool IsEncrypted
+    {
+        get
+        {
+            if (_isEncryped.Value.HasValue)
+                return _isEncryped.Value.Value;
+            return true;
+        }
+    }
+
     public enum Property
     {
         IsEncrypted
@@ -32,12 +51,10 @@ public class AesChannel : ProcessionChannel
         }
     }
 
-    private (byte[] key, byte[] iv) GetKey()
+    private (byte[]? key, byte[]? iv) GetKey()
     {
         lock (_lock)
         {
-            if (_key is null || _iv is null)
-                throw new InvalidDataException("AES key is not defined");
             return (_key, _iv);
         }
     }
@@ -60,14 +77,17 @@ public class AesChannel : ProcessionChannel
 
         packet.Properties[Property.IsEncrypted] = true;
 
-        (byte[] key, byte[] iv) = GetKey();
+        (byte[]? key, byte[]? iv) = GetKey();
+        if (key is null || iv is null)
+            throw new InvalidOperationException("Received encrypted package but there is no encryption keys");
 
         using var srcStream = new MemoryStream(packet.Data[pos..]);
         using var dstStream = new MemoryStream();
-        using var crypto = new CryptoStream(srcStream, _aes.CreateDecryptor(key, iv), CryptoStreamMode.Read);
-
-        var _ = await Serializer.FromStreamAsync<int>(crypto, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken);
-        await crypto.CopyToAsync(dstStream, cancellationToken);
+        using (var crypto = new CryptoStream(srcStream, _aes.CreateDecryptor(key, iv), CryptoStreamMode.Read))
+        {
+            var _ = await Serializer.FromStreamAsync<int>(crypto, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken);
+            await crypto.CopyToAsync(dstStream, cancellationToken);
+        }
 
         return new Packet(packet, dstStream.ToArray());
     }
@@ -77,23 +97,26 @@ public class AesChannel : ProcessionChannel
         ArgumentNullException.ThrowIfNull(packet);
         ArgumentNullException.ThrowIfNull(cancellationToken);
 
-        var isEncrypted = true;
+        var isEncrypted = IsEncrypted;
         if (packet.Properties.TryGetValue(Property.IsEncrypted, out var value) && value is bool flag)
             isEncrypted = flag;
 
         if (!isEncrypted)
             return packet;
 
+        (byte[]? key, byte[]? iv) = GetKey();
+        if (key is null || iv is null) return packet;
+
         var salt = RandomNumberGenerator.GetInt32(int.MinValue, int.MaxValue);
-        (byte[] key, byte[] iv) = GetKey();
 
         using var srcStream = new MemoryStream(packet.Data);
         using var dstStream = new MemoryStream();
-        using var crypto = new CryptoStream(dstStream, _aes.CreateEncryptor(key, iv), CryptoStreamMode.Write);
-
-        await dstStream.WriteAsync(_marker, cancellationToken);
-        await Serializer.ToStreamAsync(crypto, salt, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken);
-        await srcStream.CopyToAsync(crypto, cancellationToken);
+        using (var crypto = new CryptoStream(dstStream, _aes.CreateEncryptor(key, iv), CryptoStreamMode.Write))
+        {
+            await dstStream.WriteAsync(_marker, cancellationToken);
+            await Serializer.ToStreamAsync(crypto, salt, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken);
+            await srcStream.CopyToAsync(crypto, cancellationToken);
+        }        
 
         return new Packet(packet, dstStream.ToArray());
     }
