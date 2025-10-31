@@ -1,7 +1,7 @@
 namespace Sigurn.Rpc;
 
 [RemoteInterface]
-interface IServiceCatalog
+public interface IServiceCatalog
 {
     Task<IReadOnlyList<ServiceInfo>> GetServicesAsync(CancellationToken cancellationToken);
 }
