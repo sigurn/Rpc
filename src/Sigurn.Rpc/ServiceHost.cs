@@ -16,13 +16,17 @@ public class ServiceHost : IServiceHost
 
     private readonly List<Session> _sessions = new();
 
+    private readonly Lazy<IServiceCatalog> _serviceCatalog;
+
     public ServiceHost(IChannelHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
 
+        _serviceCatalog = new Lazy<IServiceCatalog>(CreateServiceCatalog);
         _host = host;
         _host.Connected += OnConnected;
         _host.Disconnected += OnDisconnected;
+
     }
 
     public void Start()
@@ -64,6 +68,21 @@ public class ServiceHost : IServiceHost
         }
     }
 
+    private volatile bool _publishServicesCatalog = false;
+    public bool PublishServicesCatalog
+    {
+        get
+        {
+            lock (_services)
+                return _publishServicesCatalog;
+        }
+        set
+        {
+            lock (_services)
+                _publishServicesCatalog = value;
+        }
+    }
+
     private void OnConnected(object? sender, ChannelEventArgs args)
     {
         if (sender is null ||
@@ -93,10 +112,11 @@ public class ServiceHost : IServiceHost
     {
         lock (_services)
         {
+            if (type == typeof(IServiceCatalog) && _publishServicesCatalog)
+                return (ShareWithin.Host, () => _serviceCatalog.Value);
+
             if (_services.TryGetValue(type, out var serviceData))
-            {
                 return (serviceData.Shared, serviceData.Factory);
-            }
 
             throw new Exception($"Unknown service {type}");
         }
@@ -106,7 +126,12 @@ public class ServiceHost : IServiceHost
     {
         Type[] types;
         lock (_services)
+        {
+            if (typeof(IServiceCatalog).GUID == id && _publishServicesCatalog)
+                return typeof(IServiceCatalog);
+
             types = _services.Keys.ToArray();
+        }
 
         return types.Where(x => x.GUID == id).FirstOrDefault();
     }
@@ -142,5 +167,26 @@ public class ServiceHost : IServiceHost
 
             return refCounter;
         }
+    }
+
+    private class ServiceCatalog : IServiceCatalog
+    {
+        private readonly Dictionary<Type, ServiceData> _services;
+
+        public ServiceCatalog(Dictionary<Type, ServiceData> services)
+        {
+            _services = services;
+        }
+        
+        public Task<IReadOnlyList<ServiceInfo>> GetServicesAsync(CancellationToken cancellationToken)
+        {
+            lock (_services)
+                return Task.FromResult<IReadOnlyList<ServiceInfo>>(_services.Select(x => ServiceInfo.Create(x.Key, x.Value.Shared)).ToList());
+        }
+    }
+
+    private IServiceCatalog CreateServiceCatalog()
+    {
+        return new ServiceCatalog(_services);
     }
 }

@@ -690,6 +690,84 @@ public class ServiceHostTests
         Assert.Equal<IEnumerable<string>>(["Created", "SetProperty1 -5", "Disposed"], log.ToImmutableArrayWithLock());
     }
 
+
+    [Fact(Timeout = 15000)]
+    public async Task GetServicesCatalog()
+    {
+        List<string> log = new ();
+
+        var tcpHost = new TcpHost();
+        tcpHost.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.None, () => new TestService(log));
+        sh.PublishServicesCatalog = true;
+
+        sh.Start();
+
+        var client = new TcpChannel(tcpHost.EndPoint);
+
+        await client.OpenAsync(CancellationToken.None);
+
+        var gip = new GetInstancePacket()
+        {
+            InterfaceId = typeof(IServiceCatalog).GUID
+        };
+        var context = RpcPacket.DefaultSerializationContext;
+        await client.SendAsync(new Packet(await ToBytes<RpcPacket>(gip, context, CancellationToken.None)), CancellationToken.None);
+        
+        IPacket packet;
+        using (CancellationTokenSource cts = new CancellationTokenSource())
+        {
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            packet = await client.ReceiveAsync(cts.Token);
+        }
+        
+        RpcPacket? rpcp = await FromBytes<RpcPacket>(packet.Data, context, CancellationToken.None);
+        Assert.NotNull(rpcp);
+        Assert.IsType<ServiceInstancePacket>(rpcp);
+        var serviceInstance = (ServiceInstancePacket)rpcp;
+        Assert.NotEqual(Guid.Empty, serviceInstance.InstanceId);
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task ServicesCatalogIsNotAvailable()
+    {
+        List<string> log = new ();
+
+        var tcpHost = new TcpHost();
+        tcpHost.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.None, () => new TestService(log));
+        sh.PublishServicesCatalog = false;
+
+        sh.Start();
+
+        var client = new TcpChannel(tcpHost.EndPoint);
+
+        await client.OpenAsync(CancellationToken.None);
+
+        var gip = new GetInstancePacket()
+        {
+            InterfaceId = typeof(IServiceCatalog).GUID
+        };
+        var context = RpcPacket.DefaultSerializationContext;
+        await client.SendAsync(new Packet(await ToBytes<RpcPacket>(gip, context, CancellationToken.None)), CancellationToken.None);
+        
+        IPacket packet;
+        using (CancellationTokenSource cts = new CancellationTokenSource())
+        {
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            packet = await client.ReceiveAsync(cts.Token);
+        }
+        
+        RpcPacket? rpcp = await FromBytes<RpcPacket>(packet.Data, context, CancellationToken.None);
+        Assert.NotNull(rpcp);
+        Assert.IsType<ExceptionPacket>(rpcp);
+        var ep = (ExceptionPacket)rpcp;
+        Assert.Equal("Requested service is not available", ep.Message);
+        Assert.Equal("System.Exception", ep.Type);
+    }
+
     private static async Task<byte[]> ToBytes<T>(T value, SerializationContext context, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();

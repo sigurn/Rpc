@@ -1101,4 +1101,41 @@ public class RpcClientTests
 
         client.Dispose();
     }
+
+    [Fact(Timeout = 15000)]
+    public async Task GetListOfService()
+    {
+        List<string> log = new();
+        using ManualResetEvent destroyEvent = new ManualResetEvent(false);
+        using TcpHost host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        ServiceHost serviceHost = new ServiceHost(host);
+        serviceHost.RegisterSerive<ITestService>(ShareWithin.Host, () => new TestService(log, destroyEvent));
+        serviceHost.PublishServicesCatalog = true;
+        serviceHost.Start();
+
+        using CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+        cancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(5));
+
+        using RpcClient client = new RpcClient(async cancellationToken =>
+        {
+            var channel = new TcpChannel(host.EndPoint);
+            await channel.OpenAsync(cancellationToken);
+            return channel;
+        });
+
+        await client.OpenAsync(cancellationTokenSource.Token);
+
+        var catalog = await client.GetService<IServiceCatalog>(cancellationTokenSource.Token);
+        Assert.NotNull(catalog);
+        var services = await catalog.GetServicesAsync(CancellationToken.None);
+
+        Assert.NotNull(services);
+        Assert.Single(services);
+        Assert.Equal(typeof(ITestService), services[0].InterfaceType);
+        Assert.Equal(ShareWithin.Host, services[0].ShareType);
+        Assert.Equal(typeof(ITestService).FullName, services[0].InterfaceName);
+
+        client.Dispose();
+    }
 }

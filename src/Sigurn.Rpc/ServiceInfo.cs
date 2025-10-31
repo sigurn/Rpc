@@ -1,29 +1,49 @@
-using System.Reflection;
+using Sigurn.Serialize;
 
 namespace Sigurn.Rpc;
 
-public sealed class ServiceInfo<T>
+public class ServiceInfo : ISerializable
 {
-    private readonly Func<ISession, T> _factory;
-    public ServiceInfo(Func<ISession, T> factory)
+    public string InterfaceName { get; private set; } = string.Empty;
+    public Type? InterfaceType { get; private set; }
+    public ShareWithin ShareType { get; private set; }
+
+    public static ServiceInfo Create(Type type, ShareWithin shareType)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(type);
 
-        ServiceType = typeof(T);
-        _factory = factory;
-
-        var attr = ServiceType.GetCustomAttribute<RemoteServiceAttribute>(false);
-        if (attr is null)
-            throw new ArgumentException($"The class '{typeof(T)}' does not have attribute RemoteServiceAttribute, so class cannot be used as remote service");
+        return new ServiceInfo()
+        {
+            InterfaceType = type,
+            ShareType = shareType,
+            InterfaceName = type.FullName ?? string.Empty
+        };
     }
 
-    public Type ServiceType { get; }
+    public async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    {
+        var typeGuid = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
+        InterfaceName = (await Serializer.FromStreamAsync<string>(stream, context, cancellationToken)) ?? string.Empty;
+        ShareType = await Serializer.FromStreamAsync<ShareWithin>(stream, context, cancellationToken);
+        InterfaceType = GetTypeById(typeGuid);
+    }
 
-    public Guid ServiceId => ServiceType.GUID;
+    public async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
+    {
+        if (InterfaceType is null)
+            throw new InvalidOperationException("Interface type cannot be null");
+        await Serializer.ToStreamAsync(stream, InterfaceType.GUID, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, InterfaceName, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, ShareType, context, cancellationToken);
+    }
 
-    public IReadOnlyList<Type> SupportedInterfaces { get; } = new List<Type>();
-
-    public IReadOnlyList<Type> AvailableIntefraces { get; } = new List<Type>();
-
-
+    private static Type? GetTypeById(Guid id)
+    {
+        return AppDomain.CurrentDomain
+            .GetAssemblies()
+            .SelectMany(a => a.GetTypes())
+            .FirstOrDefault(t => t.GUID == id);
+    }
 }
+
+ 

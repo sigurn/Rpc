@@ -46,6 +46,11 @@ public class InterfaceProxy : IDisposable
 
     private static Dictionary<Type, Func<Guid, object>> _factories = new();
 
+    static InterfaceProxy()
+    {
+        RegisterProxy<IServiceCatalog>(x => new ServiceCatalogProxy(x));
+    }
+
     internal static T CreateProxy<T>(Guid instanceId, RefCounter<ICallTarget> callTarget, SerializationContext context)
     {
         if (!typeof(T).IsInterface)
@@ -97,6 +102,17 @@ public class InterfaceProxy : IDisposable
 
             _factories.Add(typeof(T), x => factory(x) ?? throw new InvalidOperationException("Factory returned null as the proxy instance."));
         }
+    }
+
+    public static bool IsThereProxyFor<T>()
+    {
+        return IsThereProxyFor(typeof(T));
+    }
+
+    public static bool IsThereProxyFor(Type interfaceType)
+    {
+        lock (_factories)
+            return _factories.ContainsKey(interfaceType);
     }
 
     public static bool IsInterfaceProxy<T>(T obj)

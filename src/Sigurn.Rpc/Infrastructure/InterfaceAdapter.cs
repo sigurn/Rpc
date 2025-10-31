@@ -8,6 +8,11 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     private static readonly object _lock = new();
     private static Dictionary<Type, Func<object, InterfaceAdapter>> _factories = new();
 
+    static InterfaceAdapter()
+    {
+        RegisterAdapter<IServiceCatalog>(x => new ServiceCatalogAdapter(x));
+    }
+
     public static void RegisterAdapter<T>(Func<T, InterfaceAdapter> factory)
     {
         if (!typeof(T).IsInterface)
@@ -21,6 +26,17 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
                 throw new ArgumentException($"Adapter for the type {typeof(T)} is already registered");
             _factories.Add(typeof(T), x => factory((T)x));
         }
+    }
+    
+    public static bool IsThereAdapterFor<T>()
+    {
+        return IsThereAdapterFor(typeof(T));
+    }
+
+    public static bool IsThereAdapterFor(Type interfaceType)
+    {
+        lock (_factories)
+            return _factories.ContainsKey(interfaceType);
     }
 
     internal static ICallTarget CreateAdapter<T>(T instance, SerializationContext context)

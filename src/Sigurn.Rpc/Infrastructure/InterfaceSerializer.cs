@@ -1,3 +1,4 @@
+using System.Reflection;
 using Sigurn.Serialize;
 
 namespace Sigurn.Rpc.Infrastructure;
@@ -6,7 +7,11 @@ class InterfaceSerializer : IGeneralSerializer
 {
     public bool IsTypeSupported(Type type)
     {
-        return type.IsInterface;
+        if (!type.IsInterface) return false;
+        var attr = type.GetCustomAttribute<RemoteInterfaceAttribute>();
+        if (attr is null) return false;
+
+        return InterfaceAdapter.IsThereAdapterFor(type) && InterfaceProxy.IsThereProxyFor(type);
     }
 
     public async Task<object> FromStreamAsync(Stream stream, Type type, SerializationContext context, CancellationToken cancellationToken)

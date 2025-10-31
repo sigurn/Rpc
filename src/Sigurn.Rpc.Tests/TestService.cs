@@ -3,6 +3,7 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc.Tests;
 
+[RemoteInterface]
 public interface ITestNotification
 {
     void OnNotification(string data);
