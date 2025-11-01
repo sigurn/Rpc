@@ -1,3 +1,4 @@
+using Sigurn.Rpc.Infrastructure;
 using Sigurn.Serialize;
 
 namespace Sigurn.Rpc;
@@ -39,6 +40,8 @@ public class ServiceInfo : ISerializable
 
     private static Type? GetTypeById(Guid id)
     {
+        var type = InterfaceTypeRegistry.GetTypeById(id);
+        if (type is not null) return type;
         return AppDomain.CurrentDomain
             .GetAssemblies()
             .SelectMany(a => a.GetTypes())

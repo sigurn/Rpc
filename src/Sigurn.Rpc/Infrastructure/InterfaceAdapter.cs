@@ -26,6 +26,8 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
                 throw new ArgumentException($"Adapter for the type {typeof(T)} is already registered");
             _factories.Add(typeof(T), x => factory((T)x));
         }
+        
+        InterfaceTypeRegistry.RegisterType<T>();
     }
     
     public static bool IsThereAdapterFor<T>()

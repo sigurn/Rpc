@@ -102,6 +102,8 @@ public class InterfaceProxy : IDisposable
 
             _factories.Add(typeof(T), x => factory(x) ?? throw new InvalidOperationException("Factory returned null as the proxy instance."));
         }
+        
+        InterfaceTypeRegistry.RegisterType<T>();
     }
 
     public static bool IsThereProxyFor<T>()
