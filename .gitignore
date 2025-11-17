@@ -5,6 +5,7 @@ bin/
 artifacts/
 nuget/
 .vscode/
+.idea/
 
 # Verify
 *.received.*

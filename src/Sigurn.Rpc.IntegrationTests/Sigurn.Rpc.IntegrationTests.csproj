@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -10,6 +10,7 @@
 
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     <RestorePackagesPath>$(MSBuildProjectDirectory)/nuget/cache</RestorePackagesPath>
+    <ArtifactsDestination>$(MSBuildProjectDirectory)/../artifacts</ArtifactsDestination>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +28,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+    <Target Name="CreateArtifacts" BeforeTargets="Restore">
+        <MakeDir Condition="!Exists('$(ArtifactsDestination)')"
+                 Directories="$(ArtifactsDestination)" />
+    </Target>
+
   <Target Name="DeleteRestoredPackage" BeforeTargets="Restore">
     <RemoveDir Condition="Exists('$(RestorePackagesPath)/sigurn.rpc')"
                Directories="$(RestorePackagesPath)/sigurn.rpc" />
@@ -34,8 +40,8 @@
                Directories="$(RestorePackagesPath)\sigurn.rpc" />
   </Target>
 
-  <Target Name="CleanLocalNuGetCache" AfterTargets="Clean">
-    <RemoveDir Condition="Exists('$(RestorePackagesPath)')"
-               Directories="$(RestorePackagesPath)" />
-  </Target>
+<!--  <Target Name="CleanLocalNuGetCache" AfterTargets="Clean">-->
+<!--    <RemoveDir Condition="Exists('$(RestorePackagesPath)')"-->
+<!--               Directories="$(RestorePackagesPath)" />-->
+<!--  </Target>-->
 </Project>
