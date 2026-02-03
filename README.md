@@ -23,7 +23,7 @@ Sigurn.Rpc is designed with simplicity in mind, allowing you to use standard .NE
 - **No code generation**: Unlike gRPC or WCF, no proto files or service references needed
 - **Type-safe**: Compile-time safety with standard C# interfaces
 - **Flexible architecture**: Build custom transports and middleware channels
-- **Modern .NET**: Designed for .NET 6+ with latest C# features
+- **Modern .NET**: Designed for .NET 10+ with latest C# features
 
 ## Getting Started
 

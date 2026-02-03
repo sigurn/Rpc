@@ -48,7 +48,6 @@ static class Program
             });
         });
 
-        Console.TreatControlCAsInput = false;
         Console.CancelKeyPress += (s,a) =>
         {
             stopEvent.Set();
