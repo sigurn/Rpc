@@ -161,6 +161,8 @@ public abstract class BaseChannel : IChannel, IDisposable
 
     public async Task OpenAsync(CancellationToken cancellationToken)
     {
+        using var _ = _logger.Scope();
+
         CheckFaulted();
 
         using ManualResetEvent openEvent = new ManualResetEvent(false);
