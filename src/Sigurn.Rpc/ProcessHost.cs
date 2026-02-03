@@ -23,10 +23,10 @@ public class ProcessHost : IDisposable, IChannelHost
         _isOpened = false;
     }
 
-    public ProcessHost(Func<IChannel, IChannel> channelfactory)
+    public ProcessHost(Func<IChannel, IChannel> channelFactory)
         : this ()
     {
-        _channelFactory = channelfactory;
+        _channelFactory = channelFactory;
     }
 
     public ProcessHost(Func<IProtocol> protocolFactory)
@@ -35,11 +35,11 @@ public class ProcessHost : IDisposable, IChannelHost
         _protocolFactory = protocolFactory;
     }
 
-    public ProcessHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelfactory)
+    public ProcessHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
         : this ()
     {
         _protocolFactory = protocolFactory;
-        _channelFactory = channelfactory;
+        _channelFactory = channelFactory;
     }
 
     public void Dispose()
@@ -89,7 +89,6 @@ public class ProcessHost : IDisposable, IChannelHost
     public void Close()
     {
         using var _ = _logger.Scope();
-        CancellationTokenSource? cancellationTokenSource = null;
         try
         {
             lock(_lock)
@@ -97,9 +96,6 @@ public class ProcessHost : IDisposable, IChannelHost
                 if (!IsOpened) return;
                 IsOpened = false;
             }
-
-            if (cancellationTokenSource is not null)
-                cancellationTokenSource.Cancel();
 
             IChannel? channel;
             lock(_lock)
@@ -117,7 +113,6 @@ public class ProcessHost : IDisposable, IChannelHost
         }
         finally
         {
-            cancellationTokenSource?.Dispose();
             _logger.LogDebug("Channel host is closed");
         }
     }

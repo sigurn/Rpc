@@ -32,14 +32,14 @@ class ErrorPacket : RpcPacket
         _error = RpcError.None;
     }
 
-    public ErrorPacket(RpcPacket reques, RpcError error)
-        : base(PacketType.Error, reques)
+    public ErrorPacket(RpcPacket request, RpcError error)
+        : base(PacketType.Error, request)
     {
         _error = error;
     }
 
-    public ErrorPacket(RpcPacket reques, RpcErrorException ex)
-        : base(PacketType.Error, reques)
+    public ErrorPacket(RpcPacket request, RpcErrorException ex)
+        : base(PacketType.Error, request)
     {
         _error = ex.Error;
         _stackTrace = ex.StackTrace;

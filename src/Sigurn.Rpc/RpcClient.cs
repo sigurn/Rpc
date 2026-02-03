@@ -74,7 +74,7 @@ public class RpcClient : IDisposable, IAsyncDisposable
             tasks = _tasks.ToArray();
             _tasks.Clear();
             cts = _cts;
-            cts = null;
+            _cts = null;
         }
 
         if (cts is not null)

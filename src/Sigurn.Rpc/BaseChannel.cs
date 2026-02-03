@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 
@@ -19,8 +18,8 @@ public abstract class BaseChannel : IChannel, IDisposable
     protected readonly object _lock = new();
     private volatile bool _isDisposed = false;
 
-    private CancellationTokenSource? _recevieCancellationSource = null;
-    private Task<IPacket>? _recevieTask = null;
+    private CancellationTokenSource? _receiveCancellationSource = null;
+    private Task<IPacket>? _receiveTask = null;
 
     private CancellationTokenSource? _sendCancellationSource = null;
     private Task<IPacket>? _sendTask = null;
@@ -88,7 +87,7 @@ public abstract class BaseChannel : IChannel, IDisposable
             if (_state == ChannelState.Opening)
             {
                 if (_openCancellationSource is null || _openTask is null)
-                    throw new InvalidOperationException("The cannel is in opening state. Cannot close it now");
+                    throw new InvalidOperationException("The channel is in opening state. Cannot close it now");
 
                 task = _openTask;
                 _openCancellationSource.Cancel();
@@ -124,9 +123,9 @@ public abstract class BaseChannel : IChannel, IDisposable
 
             lock (_lock)
             {
-                receiveTask = _recevieTask;
-                if (_recevieCancellationSource is not null && !_recevieCancellationSource.IsCancellationRequested)
-                    _recevieCancellationSource.Cancel();
+                receiveTask = _receiveTask;
+                if (_receiveCancellationSource is not null && !_receiveCancellationSource.IsCancellationRequested)
+                    _receiveCancellationSource.Cancel();
 
                 sendTask = _sendTask;
                 if (_sendCancellationSource is not null && !_sendCancellationSource.IsCancellationRequested)
@@ -166,23 +165,24 @@ public abstract class BaseChannel : IChannel, IDisposable
         CheckFaulted();
 
         using ManualResetEvent openEvent = new ManualResetEvent(false);
-        Task task;
-        CancellationTokenSource openCancellationSource;
-        lock (_lock)
-        {
-            if (_state == ChannelState.Opened || _state == ChannelState.Opening)
-                return;
-
-            openCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _openCancellationSource = openCancellationSource;
-            task = DelayedOpenAsync(openEvent, _openCancellationSource.Token);
-            _openTask = task;
-
-            _state = ChannelState.Opening;
-        }
+        Task? task = null;
+        CancellationTokenSource? openCancellationSource = null;
 
         try
         {
+            lock (_lock)
+            {
+                if (_state == ChannelState.Opened || _state == ChannelState.Opening)
+                    return;
+
+                openCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _openCancellationSource = openCancellationSource;
+                task = DelayedOpenAsync(openEvent, _openCancellationSource.Token);
+                _openTask = task;
+
+                _state = ChannelState.Opening;
+            }
+
             RaiseOpening();
 
             openEvent.Set();
@@ -211,8 +211,8 @@ public abstract class BaseChannel : IChannel, IDisposable
                 _openCancellationSource = null;
             }
 
-            task.Dispose();
-            openCancellationSource.Dispose();
+            task?.Dispose();
+            openCancellationSource?.Dispose();
         }
     }
 
@@ -224,12 +224,12 @@ public abstract class BaseChannel : IChannel, IDisposable
             if (_state != ChannelState.Opened)
                 throw new InvalidOperationException("The channel is not opened.");
 
-            if (_recevieTask is not null)
-                throw new InvalidOperationException("The receive operation is already running. Cannot run conncurrent receive operations.");
+            if (_receiveTask is not null)
+                throw new InvalidOperationException("The receive operation is already running. Cannot run concurrent receive operations.");
 
-            _recevieCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            task = InternalReceiveAsync(_recevieCancellationSource.Token);
-            _recevieTask = task;
+            _receiveCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            task = InternalReceiveAsync(_receiveCancellationSource.Token);
+            _receiveTask = task;
         }
 
         try
@@ -240,9 +240,9 @@ public abstract class BaseChannel : IChannel, IDisposable
         {
             lock (_lock)
             {
-                _recevieTask = null;
-                _recevieCancellationSource?.Dispose();
-                _recevieCancellationSource = null;
+                _receiveTask = null;
+                _receiveCancellationSource?.Dispose();
+                _receiveCancellationSource = null;
             }            
         }
     }
@@ -256,13 +256,12 @@ public abstract class BaseChannel : IChannel, IDisposable
                 throw new InvalidOperationException("The channel is not opened.");
 
             if (_sendTask is not null)
-                throw new InvalidOperationException("The send operation is already running. Cannot run conncurrent send operations.");
+                throw new InvalidOperationException("The send operation is already running. Cannot run concurrent send operations.");
 
             _sendCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             task = InternalSendAsync(packet, _sendCancellationSource.Token);
             _sendTask = task;
         }
-
 
         try
         {

@@ -28,10 +28,10 @@ public class TcpHost : IDisposable, IChannelHost
         _isOpened = false;
     }
 
-    public TcpHost(Func<IChannel, IChannel> channelfactory)
+    public TcpHost(Func<IChannel, IChannel> channelFactory)
         : this ()
     {
-        _channelFactory = channelfactory;
+        _channelFactory = channelFactory;
     }
 
     public TcpHost(Func<IProtocol> protocolFactory)
@@ -40,11 +40,11 @@ public class TcpHost : IDisposable, IChannelHost
         _protocolFactory = protocolFactory;
     }
 
-    public TcpHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelfactory)
+    public TcpHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
         : this ()
     {
         _protocolFactory = protocolFactory;
-        _channelFactory = channelfactory;
+        _channelFactory = channelFactory;
     }
 
     public void Dispose()

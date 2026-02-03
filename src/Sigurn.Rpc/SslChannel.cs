@@ -6,7 +6,7 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace Sigurn.Rpc;
 
-public class SslChannel : BaseChannel, IAutenticatedChannel, IAddressableChannel
+public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChannel
 {
     private readonly IPEndPoint _endPoint;
     private readonly X509Certificate? _certificate;
@@ -159,7 +159,7 @@ public class SslChannel : BaseChannel, IAutenticatedChannel, IAddressableChannel
 
         await socket.ConnectAsync(_endPoint, cancellationToken);
 
-        var sslStrem = new SslStream(new NetworkStream(socket), false, ValidateRemoteCertificate);
+        var sslStream = new SslStream(new NetworkStream(socket), false, ValidateRemoteCertificate);
 
         SslClientAuthenticationOptions authOptions = new SslClientAuthenticationOptions
         {
@@ -171,10 +171,13 @@ public class SslChannel : BaseChannel, IAutenticatedChannel, IAddressableChannel
         if (_certificate is not null)
             authOptions.ClientCertificates = new X509CertificateCollection(new X509Certificate[] { _certificate });
 
-        await sslStrem.AuthenticateAsClientAsync(authOptions, cancellationToken);
+        await sslStream.AuthenticateAsClientAsync(authOptions, cancellationToken);
 
         lock (_lock)
+        {
             _socket = socket;
+            _sslStream = sslStream;
+        }
     }
 
     protected override Task InternalCloseAsync(CancellationToken cancellationToken)
@@ -234,7 +237,7 @@ public class SslChannel : BaseChannel, IAutenticatedChannel, IAddressableChannel
             _protocol.EndReceiving();
 
             if (ex.SocketErrorCode == SocketError.OperationAborted)
-                throw new OperationCanceledException("Receve operation was cancelled", ex);
+                throw new OperationCanceledException("Receive operation was cancelled", ex);
 
             GoToFaultedState();
             throw;

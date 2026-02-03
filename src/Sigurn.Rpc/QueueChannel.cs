@@ -108,14 +108,14 @@ sealed class QueueChannel : IChainedChannel, IDisposable
             {
                 _isSending = true;
                 _channel.SendAsync(packet, cancellationToken)
-                    .ContinueWith(t => SendCompleteionHandler(t, tcs));
+                    .ContinueWith(t => SendCompletionHandler(t, tcs));
             }
         }
 
         return tcs.Task;
     }
 
-    private void SendCompleteionHandler(Task<IPacket> task, TaskCompletionSource<IPacket> tcs)
+    private void SendCompletionHandler(Task<IPacket> task, TaskCompletionSource<IPacket> tcs)
     {
         if (task.IsCanceled)
         {
@@ -145,6 +145,6 @@ sealed class QueueChannel : IChainedChannel, IDisposable
         }
 
         _channel.SendAsync(swi.Packet, swi.CancellationToken)
-            .ContinueWith(t => SendCompleteionHandler(t, swi.TaskSource));
+            .ContinueWith(t => SendCompletionHandler(t, swi.TaskSource));
     }
 }

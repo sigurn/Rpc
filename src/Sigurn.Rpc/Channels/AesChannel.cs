@@ -31,7 +31,7 @@ public class AesChannel : ProcessionChannel
     }
 
     private static readonly byte[] _marker = [0x45, 0x4E, 0x43, 0x41, 0x45, 0x53, 0xF2, 0x7D, 0x8E, 0xFD];
-    private static readonly Aes _aes = Aes.Create();
+    private readonly Aes _aes = Aes.Create();
     private readonly object _lock = new();
 
     public AesChannel(IChannel channel)

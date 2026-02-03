@@ -316,7 +316,7 @@ public class InterfaceProxy : IDisposable
 
     private void CheckDisposed()
     {
-        if (Interlocked.Exchange(ref _isDisposed, _isDisposed) != 0)
+        if (_isDisposed != 0)
             throw new InvalidOperationException("The object is already disposed");
     }
 

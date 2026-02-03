@@ -31,7 +31,7 @@ sealed class Session : ISession, IDisposable
 
     private readonly Dictionary<Enum, (object? Value, object? Password)> _properties = new();
 
-    private int _isDisposed = 0;
+    private volatile int _isDisposed = 0;
 
     internal Session(IChannel channel)
     {
@@ -97,7 +97,7 @@ sealed class Session : ISession, IDisposable
 
         lock (_proxies)
         {
-            instances = _sessionInstances.Values.ToArray();
+            instances = _proxies.Values.ToArray();
             _proxies.Clear();
         }
 
@@ -133,7 +133,7 @@ sealed class Session : ISession, IDisposable
     {
         lock (_properties)
         {
-            if (!_properties.TryGetValue(key, out var valueBucket))
+            if (_properties.TryGetValue(key, out var valueBucket))
             {
                 value = valueBucket.Value;
                 return true;
@@ -219,7 +219,7 @@ sealed class Session : ISession, IDisposable
 
     private void CheckDisposed()
     {
-        if (Interlocked.Exchange(ref _isDisposed, _isDisposed) != 0)
+        if (_isDisposed != 0)
             throw new ObjectDisposedException($"Session {Id}");
     }
 
@@ -303,7 +303,7 @@ sealed class Session : ISession, IDisposable
         return RegisterInstance(refCounter);
     }
 
-    private void ReleaseInstace(Guid instanceId)
+    private void ReleaseInstance(Guid instanceId)
     {
         RefCounter<ICallTarget>? instance = null;
         lock (_adapters)
@@ -420,7 +420,7 @@ sealed class Session : ISession, IDisposable
                 }
                 else if (request is ReleaseInstancePacket rip)
                 {
-                    ReleaseInstace(rip.InstanceId);
+                    ReleaseInstance(rip.InstanceId);
                     return new SuccessPacket(request);
                 }
                 else if (request is MethodCallPacket mcp)

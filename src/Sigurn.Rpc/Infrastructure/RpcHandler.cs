@@ -55,7 +55,7 @@ class RpcHandler : IDisposable
     public void Dispose()
     {
         if (!StopHandling().Wait(TimeSpan.FromSeconds(5)))
-            throw new Exception("Failed to stop packet handling withing 5 seconds");
+            throw new Exception("Failed to stop packet handling within 5 seconds");
     }
 
     public IChannel Channel => _channel;
@@ -96,7 +96,7 @@ class RpcHandler : IDisposable
         }
     }
 
-    public ICallTarget CreateCallTargetForInstace(Guid instanceId)
+    public ICallTarget CreateCallTargetForInstance(Guid instanceId)
     {
         return new ServiceInstance(instanceId, this);
     }
@@ -117,12 +117,12 @@ class RpcHandler : IDisposable
     {
         using var taskCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        var completetionSource = new TaskCompletionSource<RpcPacket>();
+        var completionSource = new TaskCompletionSource<RpcPacket>();
         CancellationTokenRegistration? ctr = null;
         
         try
         {
-            if (!_requests.TryAdd(packet.RequestId, completetionSource))
+            if (!_requests.TryAdd(packet.RequestId, completionSource))
                 throw new InvalidOperationException("Request with the same Id is already being processed");
 
             var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken));
@@ -135,7 +135,7 @@ class RpcHandler : IDisposable
                 if (_requests.TryRemove(packet.RequestId, out var rcs))
                     rcs.TrySetCanceled();
             });
-            return await completetionSource.Task.WaitAsync(AnswerTimeout);
+            return await completionSource.Task.WaitAsync(AnswerTimeout);
         }
         finally
         {
@@ -148,12 +148,12 @@ class RpcHandler : IDisposable
     {
         using var taskCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        var completetionSource = new TaskCompletionSource<RpcPacket>();
+        var completionSource = new TaskCompletionSource<RpcPacket>();
         CancellationTokenRegistration? ctr = null;
 
         try
         {
-            if (!_requests.TryAdd(packet.RequestId, completetionSource))
+            if (!_requests.TryAdd(packet.RequestId, completionSource))
                 throw new InvalidOperationException("Request with the same Id is already being processed");
 
             var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken));
@@ -166,7 +166,7 @@ class RpcHandler : IDisposable
                     rcs.TrySetCanceled();
             });
 
-            var answer = await completetionSource.Task.WaitAsync(AnswerTimeout);
+            var answer = await completionSource.Task.WaitAsync(AnswerTimeout);
             if (answer is T a)
                 return a;
             else if (answer is ExceptionPacket exp)
@@ -206,7 +206,7 @@ class RpcHandler : IDisposable
 
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(Guid instanceId, int methodId, IReadOnlyList<byte[]> args, bool oneWay, CancellationToken cancellationToken)
     {
-        var reques = new MethodCallPacket
+        var request = new MethodCallPacket
         {
             InstanceId = instanceId,
             MethodId = methodId,
@@ -214,54 +214,54 @@ class RpcHandler : IDisposable
             OneWay = oneWay
         };
 
-        var answer = await RequestAsync<MethodResultPacket>(reques, cancellationToken);
+        var answer = await RequestAsync<MethodResultPacket>(request, cancellationToken);
         return (answer.Result, answer.Args);
     }
 
     public async Task<byte[]?> GetPropertyAsync(Guid instanceId, int propertyId, CancellationToken cancellationToken)
     {
-        var reques = new GetPropertyPacket
+        var request = new GetPropertyPacket
         {
             InstanceId = instanceId,
             PropertyId = propertyId,
         };
 
-        var answer = await RequestAsync<PropertyValuePacket>(reques, cancellationToken);
+        var answer = await RequestAsync<PropertyValuePacket>(request, cancellationToken);
         return answer.Value;
     }
 
     public async Task SetPropertyAsync(Guid instanceId, int propertyId, byte[]? value, CancellationToken cancellationToken)
     {
-        var reques = new SetPropertyPacket
+        var request = new SetPropertyPacket
         {
             InstanceId = instanceId,
             PropertyId = propertyId,
             Value = value
         };
 
-        await RequestAsync<SuccessPacket>(reques, cancellationToken);
+        await RequestAsync<SuccessPacket>(request, cancellationToken);
     }
 
     public async Task AttachEventAsync(Guid instanceId, int eventId, CancellationToken cancellationToken)
     {
-        var reques = new SubscribeForEventPacket
+        var request = new SubscribeForEventPacket
         {
             InstanceId = instanceId,
             EventId = eventId,
         };
 
-        await RequestAsync<SuccessPacket>(reques, cancellationToken);
+        await RequestAsync<SuccessPacket>(request, cancellationToken);
     }
 
     public async Task DetachEventAsync(Guid instanceId, int eventId, CancellationToken cancellationToken)
     {
-        var reques = new UnsubscribeFromEventPacket
+        var request = new UnsubscribeFromEventPacket
         {
             InstanceId = instanceId,
             EventId = eventId,
         };
 
-        await RequestAsync<SuccessPacket>(reques, cancellationToken);
+        await RequestAsync<SuccessPacket>(request, cancellationToken);
     }
 
     private void OnChannelOpened(object? sender, EventArgs args)
@@ -410,9 +410,9 @@ class RpcHandler : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         var packetHandlers = GetPacketHandlers();
-        foreach (var packetHadnler in packetHandlers)
+        foreach (var packetHandler in packetHandlers)
         {
-            var response = await packetHadnler(request, cancellationToken);
+            var response = await packetHandler(request, cancellationToken);
             if (response is not null) return response;
         }
 

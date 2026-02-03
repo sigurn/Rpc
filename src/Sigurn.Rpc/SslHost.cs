@@ -32,11 +32,11 @@ public class SslHost : IDisposable, IChannelHost
         _isOpened = false;
     }
 
-    public SslHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelfactory)
+    public SslHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
         : this ()
     {
         _protocolFactory = protocolFactory;
-        _channelFactory = channelfactory;
+        _channelFactory = channelFactory;
     }
 
     public void Dispose()

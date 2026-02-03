@@ -428,7 +428,7 @@ public class RestorableChannel : IChannel
             handler(this, EventArgs.Empty);
     }
 
-    protected void GoToFaultedState( )
+    protected void GoToFaultedState()
     {
         lock (_lock)
         {

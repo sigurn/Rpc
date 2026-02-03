@@ -82,7 +82,7 @@ class ProcessChannel : BaseChannel
         lock(_lock)
         {
             process = _process;
-            _process = process;
+            _process = null;
         }
 
         if (_inputStream is null && _outputStream is null) return;

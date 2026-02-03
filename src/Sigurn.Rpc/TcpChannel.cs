@@ -132,7 +132,7 @@ public class TcpChannel : BaseChannel, IAddressableChannel
             _protocol.EndReceiving();
 
             if (ex.SocketErrorCode == SocketError.OperationAborted)
-                throw new OperationCanceledException("Receve operation was cancelled", ex);
+                throw new OperationCanceledException("Receive operation was cancelled", ex);
 
             GoToFaultedState();
             throw;
