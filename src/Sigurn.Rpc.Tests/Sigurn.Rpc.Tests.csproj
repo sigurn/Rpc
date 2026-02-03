@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Sigurn.Rpc.TestProcess/Sigurn.Rpc.TestProcess.csproj" />
     <ProjectReference Include="../Sigurn.Rpc/Sigurn.Rpc.csproj" />
     <ProjectReference Include="../Sigurn.Rpc.Generator/Sigurn.Rpc.Generator.csproj" />
   </ItemGroup>
