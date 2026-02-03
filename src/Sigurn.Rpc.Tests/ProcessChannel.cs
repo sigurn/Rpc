@@ -15,7 +15,7 @@ public class ProcessChannelTests
         _directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task StartStopProcess()
     {
         ProcessChannel? channel = null;
@@ -35,7 +35,7 @@ public class ProcessChannelTests
         Assert.True(process.HasExited);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task GetServicesCatalog()
     {
         ProcessChannel? channel = null;
@@ -55,7 +55,7 @@ public class ProcessChannelTests
         Assert.Equal(typeof(ITestProcess), services[0].InterfaceType);
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task UseProcessService()
     {
         ProcessChannel? channel = null;
@@ -73,7 +73,7 @@ public class ProcessChannelTests
         Assert.Equal(15, service.TestMathod(5));
     }
 
-    [Fact]
+    [Fact(Timeout = 15000)]
     public async Task FinishProcess()
     {
         ProcessChannel? channel = null;
