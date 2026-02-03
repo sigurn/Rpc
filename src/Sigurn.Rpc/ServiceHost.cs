@@ -1,9 +1,13 @@
+using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
 public class ServiceHost : IServiceHost
 {
+    private static readonly ILogger<ServiceHost> _logger = RpcLogging.CreateLogger<ServiceHost>();
+
     private record struct ServiceData(ShareWithin Shared, Func<object> Factory);
 
     private static readonly Dictionary<Type, RefCounter<ICallTarget>> _globalInstances = new();
@@ -31,12 +35,14 @@ public class ServiceHost : IServiceHost
 
     public void Start()
     {
+        using var _ = _logger.Scope();
         if (_host.IsOpened) return;
         _host.Open();        
     }
 
     public void Stop()
     {
+        using var _ = _logger.Scope();
         if (!_host.IsOpened) return;
         _host.Close();
 
@@ -54,6 +60,8 @@ public class ServiceHost : IServiceHost
 
     public void RegisterSerive<T>(ShareWithin share, Func<T> factory) where T : class
     {
+        using var _ = _logger.Scope();
+
         if (!typeof(T).IsInterface)
             throw new ArgumentException("Type must be an interface");
 
@@ -65,6 +73,7 @@ public class ServiceHost : IServiceHost
                 throw new ArgumentException($"Service with type {typeof(T)} is already registered.");
 
             _services.Add(typeof(T), new ServiceData(Shared: share, Factory: () => factory()));
+            _logger.LogInformation("Registered service '{type}', shared within {share}", typeof(T), share);
         }
     }
 

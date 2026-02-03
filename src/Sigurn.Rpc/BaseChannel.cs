@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
@@ -13,6 +14,8 @@ static class TaskHelpers
 
 public abstract class BaseChannel : IChannel, IDisposable
 {
+    private static readonly ILogger<BaseChannel> _logger = RpcLogging.CreateLogger<BaseChannel>();
+
     protected readonly object _lock = new();
     private volatile bool _isDisposed = false;
 
@@ -74,6 +77,7 @@ public abstract class BaseChannel : IChannel, IDisposable
 
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
+        using var _ = _logger.Scope();
         Task? task = null;
 
         lock (_lock)
@@ -95,6 +99,7 @@ public abstract class BaseChannel : IChannel, IDisposable
         {
             try
             {
+                _logger.LogTrace("Wait for opening task completion");
                 await task;
             }
             catch
@@ -129,10 +134,16 @@ public abstract class BaseChannel : IChannel, IDisposable
             }
 
             if (receiveTask is not null)
+            {
+                _logger.LogTrace("Wait for receiving task completion");
                 await receiveTask.WaitNoThrow();
+            }
 
             if (sendTask is not null)
+            {
+                _logger.LogTrace("Wait for sending task completion");
                 await sendTask.WaitNoThrow();
+            }
 
             await InternalCloseAsync(cancellationToken);
 
