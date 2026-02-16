@@ -7,7 +7,7 @@ public interface ISession
 
     IChannel Channel { get; }
 
-    IChannelHost? ChannelHost { get; }
+    object? ChannelHost { get; }
 
     object? GetProperty(Enum key);
 

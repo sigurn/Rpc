@@ -17,7 +17,7 @@ sealed class Session : ISession, IDisposable
     }
 
     private readonly IChannel _channel;
-    private readonly IChannelHost? _host;
+    private readonly object? _host;
     private readonly RpcHandler _handler;
 
     private readonly Dictionary<Type, RefCounter<ICallTarget>> _sessionInstances = new();
@@ -71,7 +71,7 @@ sealed class Session : ISession, IDisposable
         }
     }
 
-    public IChannelHost? ChannelHost
+    public object? ChannelHost
     {
         get
         {
