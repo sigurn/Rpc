@@ -60,6 +60,15 @@ sealed class Session : ISession, IDisposable
         _context = new RpcSerializationContext(this);
     }
 
+    internal Session(IChannel channel, IChannelHostAsync host, IServiceHost serviceHost)
+    {
+        _channel = channel;
+        _host = host;
+        _serviceHost = serviceHost;
+        _handler = new RpcHandler(channel, OnRequest);
+        _context = new RpcSerializationContext(this);
+    }
+
     public Guid Id { get; } = Guid.NewGuid();
 
     public IChannel Channel
