@@ -1,4 +1,5 @@
-﻿using Serilog;
+﻿using Microsoft.CodeAnalysis.CSharp;
+using Serilog;
 using Serilog.Core;
 using Serilog.Events;
 using Serilog.Extensions.Logging;
@@ -29,18 +30,16 @@ static class Program
     
         RpcLogging.Configure(new SerilogLoggerFactory(Log.Logger));
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ProcessHostAsync.GetProcessCancellationToken());
-
-        var host = new ServiceHostAsync(new ProcessHostAsync())
+        var host = new ServiceHostAsync(() => ProcessHostAsync.Open())
         {
             PublishServicesCatalog = true
         };
 
         host.RegisterSerive<ITestProcess>(ShareWithin.Host, () =>
         {
-            return new TestProcessService(() => cts.Cancel());
+            return new TestProcessService(() => ProcessTermination.Cancel("Canceled by service request"));
         });
 
-        await host.RunAsync(cts.Token);
+        await host.RunAsync(ProcessTermination.CancellationToken);
     }
 }
