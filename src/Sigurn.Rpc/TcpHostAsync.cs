@@ -1,0 +1,73 @@
+using System.Net;
+using System.Net.Sockets;
+using Sigurn.Rpc.Infrastructure;
+
+namespace Sigurn.Rpc;
+
+public static class TcpHostAsync
+{
+    class TcpAcceptor : BaseAcceptor,  ILocalAddress
+    {
+        private readonly Socket _socket;
+        private readonly Func<IProtocol> _protocolFactory;
+        private readonly Func<IChannel, IChannel> _channelFactory;
+
+        public TcpAcceptor(Socket socket, Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
+        {
+            ArgumentNullException.ThrowIfNull(socket);
+            ArgumentNullException.ThrowIfNull(protocolFactory);
+            ArgumentNullException.ThrowIfNull(channelFactory);
+
+            _socket = socket;
+            _protocolFactory = protocolFactory;
+            _channelFactory = channelFactory;
+        }
+
+        public string LocalAddress => _socket?.LocalEndPoint?.ToString() ?? string.Empty;
+
+        protected override async Task<IChannel> Accept(CancellationToken cancellationToken)
+        {
+            var socket = await _socket.AcceptAsync(cancellationToken);
+            var channel = _channelFactory(new TcpChannel(socket, _protocolFactory()));
+
+            return channel;
+        }
+
+        protected override Task InternalDispose()
+        {
+            _socket.Close();
+            _socket.Dispose();
+
+            return Task.CompletedTask;
+        }
+    }
+
+    private static IChannel DefaultChannelFactory(IChannel channel) => channel;
+    private static IProtocol DefaultProtocolFactory() => new ChannelProtocol();
+
+    public static IPEndPoint DefaultEndPoint = new IPEndPoint(IPAddress.Any, 35768);
+
+    public static IAsyncChannelAcceptor Open()
+    {
+        return Open(DefaultEndPoint, DefaultChannelFactory, DefaultProtocolFactory);
+    }
+
+    public static IAsyncChannelAcceptor Open(IPEndPoint endPoint)
+    {
+        return Open(endPoint, DefaultChannelFactory, DefaultProtocolFactory);
+    }
+
+    public static IAsyncChannelAcceptor Open(IPEndPoint endPoint, Func<IChannel, IChannel> channelFactory)
+    {
+        return Open(endPoint, channelFactory, DefaultProtocolFactory);        
+    }
+
+    public static IAsyncChannelAcceptor Open(IPEndPoint endPoint, Func<IChannel, IChannel> channelFactory, Func<IProtocol> protocolFactory)
+    {
+        var socket = new Socket(endPoint.Address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(endPoint);
+        socket.Listen();
+
+        return new TcpAcceptor(socket, protocolFactory, channelFactory);
+    }
+}
