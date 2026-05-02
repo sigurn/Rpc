@@ -1,10 +1,11 @@
+using System.Collections.Immutable;
 using Sigurn.Rpc.Infrastructure;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
 
 namespace Sigurn.Rpc;
 
-sealed class Session : ISession, IDisposable
+sealed class Session : ISession, IDisposable, IAsyncDisposable
 {
     private static readonly AsyncLocal<ISession?> _session = new AsyncLocal<ISession?>();
 
@@ -60,10 +61,10 @@ sealed class Session : ISession, IDisposable
         _context = new RpcSerializationContext(this);
     }
 
-    internal Session(IChannel channel, IChannelHostAsync host, IServiceHost serviceHost)
+    internal Session(IChannel channel, IServiceHost serviceHost)
     {
         _channel = channel;
-        _host = host;
+        _host = null;
         _serviceHost = serviceHost;
         _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
@@ -98,6 +99,37 @@ sealed class Session : ISession, IDisposable
         }
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        RefCounter<ICallTarget>[] instances;
+
+        lock (_proxies)
+        {
+            instances = _proxies.Values.ToArray();
+            _proxies.Clear();
+        }
+
+        await DisposeInstances(instances);
+
+        lock (_adapters)
+        {
+            instances = _adapters.Values.ToArray();
+            _adapters.Clear();
+        }
+
+        await DisposeInstances(instances);
+
+        lock (_sessionInstances)
+        {
+            instances = _sessionInstances.Values.ToArray();
+            _sessionInstances.Clear();
+        }
+
+        await DisposeInstances(instances);
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
@@ -130,6 +162,16 @@ sealed class Session : ISession, IDisposable
 
         foreach (var instance in instances)
             instance.Dispose();
+    }
+
+    private async Task DisposeInstances(IEnumerable<RefCounter<ICallTarget>> instances)
+    {
+        var tasks = instances
+            .Select(i => Task.Run(() => i.Dispose()));
+
+        if (tasks is null) return;
+
+        await Task.WhenAll(tasks);
     }
 
     public object? GetProperty(Enum key)

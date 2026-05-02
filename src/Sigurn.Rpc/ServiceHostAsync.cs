@@ -1,9 +1,10 @@
+using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
-public class ServiceHostAsync : IRunnableAsync, IServiceHost
+public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 {
     private static readonly ILogger<ServiceHost> _logger = RpcLogging.CreateLogger<ServiceHost>();
 
@@ -11,7 +12,7 @@ public class ServiceHostAsync : IRunnableAsync, IServiceHost
 
     private static readonly Dictionary<Type, RefCounter<ICallTarget>> _globalInstances = new();
 
-    private readonly IChannelHostAsync[] _hosts;
+    private readonly Func<IAsyncChannelAcceptor>[] _factories;
 
     private readonly Dictionary<Type, ServiceData> _services = new();
 
@@ -23,60 +24,101 @@ public class ServiceHostAsync : IRunnableAsync, IServiceHost
 
     private volatile bool _isRunning = false;
 
-    public ServiceHostAsync(params IChannelHostAsync[] hosts)
+    public ServiceHostAsync(params Func<IAsyncChannelAcceptor>[] factories)
     {
-        ArgumentNullException.ThrowIfNull(hosts);
+        ArgumentNullException.ThrowIfNull(factories);
 
         _serviceCatalog = new Lazy<IServiceCatalog>(CreateServiceCatalog);
-        _hosts = hosts;
+        _factories = factories;
     }
 
     public bool IsRunning
     {
         get
         {
-            return _isRunning;
+            lock(_sessions)
+                return _isRunning;
         }
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        Task<IChannel>[] tasks = _hosts
-            .Select(x => x.AcceptAsync(cancellationToken))
-            .ToArray();
-
-        while(!cancellationToken.IsCancellationRequested)
+        lock(_sessions)
         {
-            var task = await Task.WhenAny(tasks.AsSpan());
-            if (task.IsCanceled) continue;
+            if (_isRunning) throw new InvalidOperationException("The service host is already running");
+            _isRunning = true;
+        }
 
-            try
+        var acceptors = _factories.Select(x => x()).ToArray();
+
+        try
+        {
+            List<Task<IChannel>> tasks = acceptors
+                .Select(x => x.AcceptAsync(cancellationToken))
+                .ToList();
+
+            while(!cancellationToken.IsCancellationRequested && tasks.Count > 0)
             {
-                var index = tasks.IndexOf(task);
-                var host = _hosts[index];
-                if (task.IsFaulted)
+                var task = await Task.WhenAny(tasks.ToImmutableArray());
+                if (task.IsCanceled)
                 {
-                    _logger.LogError("Cannot accept connection. Exception {exception}", task.Exception);
+                    tasks.Remove(task);
+                    continue;
                 }
-                else
+
+                try
                 {
-                    var channel = task.Result;
-                    var session = new Session(new QueueChannel(channel), host, this);
-                    channel.BoundObject = session;
+                    var index = tasks.IndexOf(task);
+                    var acceptor = acceptors[index];
+                    if (task.IsFaulted)
+                    {
+                        _logger.LogError("Cannot accept connection. Exception {exception}", task.Exception);
+                    }
+                    else
+                    {
+                        var channel = task.Result;
+                        var session = new Session(new QueueChannel(channel), this);
+                        channel.BoundObject = session;
 
-                    lock (_sessions)
-                        _sessions.Add(session);
+                        lock (_sessions)
+                            _sessions.Add(session);
+
+                        OnConnected(session);
+
+                        channel.Closed += (s, e) => OnDisconnectd(session);
+                        channel.Faulted += (s, e) => OnDisconnectd(session);
+                    }
+    
+                    tasks[index] = acceptors[index].AcceptAsync(cancellationToken);
                 }
+                catch(TaskCanceledException)
+                {
+                    return;
+                }
+                catch(Exception ex)
+                {
+                    _logger.LogError("Connection failed. Exception {exception}", ex);
+                }
+            }            
+        }
+        finally
+        {
+            foreach(var a in acceptors)
+                await a.DisposeAsync();
 
-                tasks[index] = _hosts[index].AcceptAsync(cancellationToken);
-            }
-            catch(TaskCanceledException)
+            Session[] sessions;
+
+            lock(_sessions)
             {
-                return;
+                sessions = _sessions.ToArray();
+                _sessions.Clear();
+
+                _isRunning = false;
             }
-            catch(Exception ex)
+
+            foreach(var s in sessions)
             {
-                _logger.LogError("Connection failed. Exception {exception}", ex);
+                await s.DisposeAsync();
             }
         }
     }
@@ -115,30 +157,8 @@ public class ServiceHostAsync : IRunnableAsync, IServiceHost
         }
     }
 
-    private void OnConnected(object? sender, ChannelEventArgs args)
-    {
-        if (sender is null ||
-            args.Channel is null ||
-            args.Channel.State != ChannelState.Opened) return;
-
-        var session = new Session(new QueueChannel(args.Channel), (IChannelHost)sender, this);
-        args.Channel.BoundObject = session;
-
-        lock (_sessions)
-            _sessions.Add(session);
-    }
-
-    private void OnDisconnected(object? sender, ChannelEventArgs args)
-    {
-        if (args is null || args.Channel is null || args.Channel.BoundObject is not Session session) return;
-
-        lock (_sessions)
-            _sessions.Remove(session);
-
-        args.Channel.BoundObject = null;
-
-        session.Dispose();
-    }
+    public event EventHandler<ChannelEventArgs>? Connected;
+    public event EventHandler<ChannelEventArgs>? Disconnected;
 
     (ShareWithin Shared, Func<object> Factory) IServiceHost.GetServiceInfo(Type type)
     {
@@ -176,6 +196,32 @@ public class ServiceHostAsync : IRunnableAsync, IServiceHost
     RefCounter<ICallTarget> IServiceHost.CreateGlobalInstance(Type type, Func<ICallTarget> factory)
     {
         return CreateInstance(type, factory, _globalInstances);
+    }
+
+    private void OnConnected(Session session)
+    {
+        if (Connected is null) return;
+        Connected(this, new ChannelEventArgs(session.Channel));
+    }
+
+    private void OnDisconnectd(Session session)
+    {
+        var channel = session.Channel;
+
+        if (Disconnected is not null)
+            Disconnected(this, new ChannelEventArgs(channel));
+
+        channel.BoundObject = null;
+
+        lock(_sessions)
+            _sessions.Remove(session);
+        
+        session.DisposeAsync().AsTask().Wait();
+
+        if (channel is IAsyncDisposable ad)
+            ad.DisposeAsync().AsTask().Wait();
+        else if (channel is IDisposable d)
+            d.Dispose();
     }
 
     private static RefCounter<ICallTarget> CreateInstance(Type type, Func<ICallTarget> factory, Dictionary<Type, RefCounter<ICallTarget>> storage)
