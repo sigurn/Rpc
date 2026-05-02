@@ -262,35 +262,37 @@ class ProcessChannel : BaseChannel
 
     public static async Task<bool> SendSignalAsync(int pid, CancellationToken cancellationToken)
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "taskkill",
-                Arguments = $"/PID {pid}",
-                CreateNoWindow = true,
-                UseShellExecute = false
-            };
-            var p = Process.Start(psi);
-            if (p is null)
-                throw new InvalidOperationException("Cannot stop process");
-            await p.WaitForExitAsync(cancellationToken);
-            return p.ExitCode == 0;
-        }
-        else
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "kill",
-                Arguments = $"-TERM {pid}",
-                CreateNoWindow = true,
-                UseShellExecute = false
-            };
-            var p = Process.Start(psi);
-            if (p is null)
-                throw new InvalidOperationException("Cannot stop process");
-            await p.WaitForExitAsync(cancellationToken);
-            return p.ExitCode == 0;
-        }
+        ProcessTermination.TerminateProcess(pid);
+        return true;
+        // if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        // {
+        //     var psi = new ProcessStartInfo
+        //     {
+        //         FileName = "taskkill",
+        //         Arguments = $"/PID {pid}",
+        //         CreateNoWindow = true,
+        //         UseShellExecute = false
+        //     };
+        //     var p = Process.Start(psi);
+        //     if (p is null)
+        //         throw new InvalidOperationException("Cannot stop process");
+        //     await p.WaitForExitAsync(cancellationToken);
+        //     return p.ExitCode == 0;
+        // }
+        // else
+        // {
+        //     var psi = new ProcessStartInfo
+        //     {
+        //         FileName = "kill",
+        //         Arguments = $"-TERM {pid}",
+        //         CreateNoWindow = true,
+        //         UseShellExecute = false
+        //     };
+        //     var p = Process.Start(psi);
+        //     if (p is null)
+        //         throw new InvalidOperationException("Cannot stop process");
+        //     await p.WaitForExitAsync(cancellationToken);
+        //     return p.ExitCode == 0;
+        // }
     }
 }
