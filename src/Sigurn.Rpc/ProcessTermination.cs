@@ -4,12 +4,18 @@ using Microsoft.Extensions.Logging;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Provides process termination support by listening for OS signals (SIGINT, SIGTERM) and exposing a cancellation token.
+/// </summary>
 public class ProcessTermination
 {
     private static readonly ILogger<ProcessTermination> _logger = RpcLogging.CreateLogger<ProcessTermination>();
 
     private static readonly object _lock = new ();
     private static CancellationTokenSource? _cts = null;
+    /// <summary>
+    /// Gets a <see cref="System.Threading.CancellationToken"/> that is cancelled when the process receives SIGINT or SIGTERM.
+    /// </summary>
     public static CancellationToken CancellationToken
     {
         get
@@ -38,6 +44,11 @@ public class ProcessTermination
         }
     }
 
+    /// <summary>
+    /// Cancels the process termination token programmatically with the specified reason.
+    /// </summary>
+    /// <param name="reason">A human-readable reason for the cancellation, used for logging.</param>
+    /// <returns><see langword="true"/> if the token was cancelled; <see langword="false"/> if it had not been created yet.</returns>
     public static bool Cancel(string reason)
     {
         lock(_lock)
@@ -91,6 +102,10 @@ public class ProcessTermination
 
     const uint CTRL_C_EVENT = 0;
 
+    /// <summary>
+    /// Sends a Ctrl+C event to the specified Windows process.
+    /// </summary>
+    /// <param name="processId">The identifier of the target process.</param>
     public static void WindowsSendCtrlC(int processId)
     {
         SetConsoleCtrlHandler(null, true);

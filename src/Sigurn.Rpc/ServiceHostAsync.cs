@@ -4,6 +4,9 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Hosts RPC services over asynchronous channel acceptors, managing sessions and service instances.
+/// </summary>
 public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 {
     private static readonly ILogger<ServiceHost> _logger = RpcLogging.CreateLogger<ServiceHost>();
@@ -24,6 +27,10 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
     private volatile bool _isRunning = false;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ServiceHostAsync"/> with the specified acceptor factories.
+    /// </summary>
+    /// <param name="factories">The acceptor factories that provide incoming channel connections.</param>
     public ServiceHostAsync(params Func<IAsyncChannelAcceptor>[] factories)
     {
         ArgumentNullException.ThrowIfNull(factories);
@@ -32,6 +39,9 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         _factories = factories;
     }
 
+    /// <summary>
+    /// Gets a value indicating whether the service host is currently running.
+    /// </summary>
     public bool IsRunning
     {
         get
@@ -41,6 +51,10 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         }
     }
 
+    /// <summary>
+    /// Starts the service host and runs until the cancellation token is cancelled, accepting and processing connections from all configured acceptors.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token used to stop the host.</param>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         lock(_sessions)
@@ -123,6 +137,12 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         }
     }
 
+    /// <summary>
+    /// Registers a service with the specified interface type, sharing scope, and factory.
+    /// </summary>
+    /// <typeparam name="T">The interface type of the service. Must be an interface.</typeparam>
+    /// <param name="share">The scope within which service instances are shared.</param>
+    /// <param name="factory">The factory used to create service instances.</param>
     public void RegisterSerive<T>(ShareWithin share, Func<T> factory) where T : class
     {
         using var _ = _logger.Scope();
@@ -143,6 +163,9 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     }
 
     private volatile bool _publishServicesCatalog = false;
+    /// <summary>
+    /// Gets or sets a value indicating whether the service catalog is published and discoverable by clients.
+    /// </summary>
     public bool PublishServicesCatalog
     {
         get
@@ -157,7 +180,14 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         }
     }
 
+    /// <summary>
+    /// Occures when a client connects and a new session is created.
+    /// </summary>
     public event EventHandler<ChannelEventArgs>? Connected;
+
+    /// <summary>
+    /// Occures when a client disconnects and the associated session is disposed.
+    /// </summary>
     public event EventHandler<ChannelEventArgs>? Disconnected;
 
     (ShareWithin Shared, Func<object> Factory) IServiceHost.GetServiceInfo(Type type)

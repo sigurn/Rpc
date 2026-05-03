@@ -3,6 +3,9 @@ using System.Net.Sockets;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Hosts a synchronous TCP channel listener that accepts incoming connections and raises channel events.
+/// </summary>
 public class TcpHost : IDisposable, IChannelHost
 {
     private static IChannel DefaultChannelFactory(IChannel channel) => channel;
@@ -22,24 +25,40 @@ public class TcpHost : IDisposable, IChannelHost
     private Task? _acceptTask;
     private volatile bool _isOpened = false;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="TcpHost"/> with default protocol and channel factories.
+    /// </summary>
     public TcpHost()
     {
         _cancellationTokenSource = null;
         _isOpened = false;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="TcpHost"/> with a custom channel factory.
+    /// </summary>
+    /// <param name="channelFactory">The factory used to wrap each accepted channel.</param>
     public TcpHost(Func<IChannel, IChannel> channelFactory)
         : this ()
     {
         _channelFactory = channelFactory;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="TcpHost"/> with a custom protocol factory.
+    /// </summary>
+    /// <param name="protocolFactory">The factory used to create a protocol for each accepted channel.</param>
     public TcpHost(Func<IProtocol> protocolFactory)
         : this ()
     {
         _protocolFactory = protocolFactory;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="TcpHost"/> with custom protocol and channel factories.
+    /// </summary>
+    /// <param name="protocolFactory">The factory used to create a protocol for each accepted channel.</param>
+    /// <param name="channelFactory">The factory used to wrap each accepted channel.</param>
     public TcpHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
         : this ()
     {
@@ -47,11 +66,17 @@ public class TcpHost : IDisposable, IChannelHost
         _channelFactory = channelFactory;
     }
 
+    /// <summary>
+    /// Closes the host and releases all resources.
+    /// </summary>
     public void Dispose()
     {
         Close();
     }
 
+    /// <summary>
+    /// Gets or sets the TCP endpoint to listen on. Cannot be changed while the host is open.
+    /// </summary>
     public IPEndPoint EndPoint
     { 
         get
@@ -75,6 +100,9 @@ public class TcpHost : IDisposable, IChannelHost
         } 
     }
 
+    /// <summary>
+    /// Gets a value indicating whether the host is currently open and accepting connections.
+    /// </summary>
     public bool IsOpened
     {
         get
@@ -90,6 +118,9 @@ public class TcpHost : IDisposable, IChannelHost
         }
     }
 
+    /// <summary>
+    /// Opens the host and starts listening for incoming TCP connections.
+    /// </summary>
     public void Open()
     {
         EndPoint endPoint;
@@ -151,6 +182,9 @@ public class TcpHost : IDisposable, IChannelHost
         }
     }
 
+    /// <summary>
+    /// Closes the host, stops accepting connections, and closes all active channels.
+    /// </summary>
     public void Close()
     {
         CancellationTokenSource? cancellationTokenSource = null;
@@ -196,7 +230,14 @@ public class TcpHost : IDisposable, IChannelHost
         }
     }
 
+    /// <summary>
+    /// Occures when a client connects and a new channel is created.
+    /// </summary>
     public event EventHandler<ChannelEventArgs>? Connected;
+
+    /// <summary>
+    /// Occures when a client disconnects and the associated channel is closed or faulted.
+    /// </summary>
     public event EventHandler<ChannelEventArgs>? Disconnected;
 
     private void OnConnected(Socket socket)

@@ -3,15 +3,28 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc.Channels;
 
+/// <summary>
+/// Implements a channel decorator that compresses outgoing packets and decompresses incoming packets using GZip.
+/// </summary>
 public class GZipChannel : ProcessionChannel
 {
+    /// <summary>
+    /// Defines packet properties used by <see cref="GZipChannel"/>.
+    /// </summary>
     public enum Property
     {
+        /// <summary>
+        /// Indicates whether the packet is compressed.
+        /// </summary>
         IsCompressed
     }
 
     private static readonly byte[] _marker = [0x47, 0x5A, 0x49, 0x50, 0xF2, 0x3F, 0xDD, 0xF9];
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="GZipChannel"/> wrapping the specified channel.
+    /// </summary>
+    /// <param name="channel">The underlying channel to wrap.</param>
     public GZipChannel(IChannel channel)
         : base(channel)
     {

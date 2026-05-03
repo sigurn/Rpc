@@ -3,6 +3,9 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Provides factory methods for creating asynchronous process channel acceptors using standard I/O streams.
+/// </summary>
 public static class ProcessHostAsync
 {
     class ProcessAcceptor : BaseAcceptor
@@ -85,16 +88,31 @@ public static class ProcessHostAsync
     private static IChannel DefaultChannelFactory(IChannel channel) => channel;
     private static IProtocol DefaultProtocolFactory() => new ChannelProtocol();
 
+    /// <summary>
+    /// Creates a process channel acceptor using default protocol and channel factories.
+    /// </summary>
+    /// <returns>An <see cref="IAsyncChannelAcceptor"/> ready to accept a connection via standard I/O.</returns>
     public static IAsyncChannelAcceptor Open()
     {
         return Open(DefaultChannelFactory, DefaultProtocolFactory);
     }
 
+    /// <summary>
+    /// Creates a process channel acceptor with a custom channel factory.
+    /// </summary>
+    /// <param name="channelFactory">The factory used to wrap the accepted channel.</param>
+    /// <returns>An <see cref="IAsyncChannelAcceptor"/> ready to accept a connection via standard I/O.</returns>
     public static IAsyncChannelAcceptor Open(Func<IChannel, IChannel> channelFactory)
     {
-        return Open(channelFactory, DefaultProtocolFactory);        
+        return Open(channelFactory, DefaultProtocolFactory);
     }
 
+    /// <summary>
+    /// Creates a process channel acceptor with custom channel and protocol factories.
+    /// </summary>
+    /// <param name="channelFactory">The factory used to wrap the accepted channel.</param>
+    /// <param name="protocolFactory">The factory used to create the protocol for the channel.</param>
+    /// <returns>An <see cref="IAsyncChannelAcceptor"/> ready to accept a connection via standard I/O.</returns>
     public static IAsyncChannelAcceptor Open(Func<IChannel, IChannel> channelFactory, Func<IProtocol> protocolFactory)
     {
         return new ProcessAcceptor(channelFactory, protocolFactory);

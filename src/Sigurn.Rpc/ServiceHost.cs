@@ -3,6 +3,9 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Hosts RPC services over a synchronous channel host, managing sessions and service instances.
+/// </summary>
 public class ServiceHost : IServiceHost
 {
     private static readonly ILogger<ServiceHost> _logger = RpcLogging.CreateLogger<ServiceHost>();
@@ -21,6 +24,10 @@ public class ServiceHost : IServiceHost
 
     private readonly Lazy<IServiceCatalog> _serviceCatalog;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ServiceHost"/> with the specified channel host.
+    /// </summary>
+    /// <param name="host">The channel host that provides connected channels.</param>
     public ServiceHost(IChannelHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -32,6 +39,9 @@ public class ServiceHost : IServiceHost
 
     }
 
+    /// <summary>
+    /// Starts the service host by opening the underlying channel host.
+    /// </summary>
     public void Start()
     {
         using var _ = _logger.Scope();
@@ -39,6 +49,9 @@ public class ServiceHost : IServiceHost
         _host.Open();        
     }
 
+    /// <summary>
+    /// Stops the service host by closing the underlying channel host and all active sessions.
+    /// </summary>
     public void Stop()
     {
         using var _ = _logger.Scope();
@@ -57,6 +70,12 @@ public class ServiceHost : IServiceHost
         Task.WaitAll(tasks);
     }
 
+    /// <summary>
+    /// Registers a service with the specified interface type, sharing scope, and factory.
+    /// </summary>
+    /// <typeparam name="T">The interface type of the service. Must be an interface.</typeparam>
+    /// <param name="share">The scope within which service instances are shared.</param>
+    /// <param name="factory">The factory used to create service instances.</param>
     public void RegisterSerive<T>(ShareWithin share, Func<T> factory) where T : class
     {
         using var _ = _logger.Scope();
@@ -77,6 +96,9 @@ public class ServiceHost : IServiceHost
     }
 
     private volatile bool _publishServicesCatalog = false;
+    /// <summary>
+    /// Gets or sets a value indicating whether the service catalog is published and discoverable by clients.
+    /// </summary>
     public bool PublishServicesCatalog
     {
         get

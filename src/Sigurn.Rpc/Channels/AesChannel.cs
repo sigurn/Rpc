@@ -4,10 +4,18 @@ using Sigurn.Serialize;
 
 namespace Sigurn.Rpc.Channels;
 
+/// <summary>
+/// Implements a channel decorator that encrypts outgoing packets and decrypts incoming packets using AES.
+/// </summary>
 public class AesChannel : ProcessionChannel
 {
     private static readonly AsyncLocal<bool?> _isEncryped = new AsyncLocal<bool?>();
 
+    /// <summary>
+    /// Sets the encryption scope for the current async context, overriding the default encryption behavior.
+    /// </summary>
+    /// <param name="isEncrypted">If <see langword="true"/>, packets in this scope will be encrypted.</param>
+    /// <returns>A disposable that restores the previous encryption scope when disposed.</returns>
     public static IDisposable SetEncryptionScope(bool isEncrypted)
     {
         var oldIsEncrypted = _isEncryped.Value;
@@ -25,8 +33,14 @@ public class AesChannel : ProcessionChannel
         }
     }
 
+    /// <summary>
+    /// Defines packet properties used by <see cref="AesChannel"/>.
+    /// </summary>
     public enum Property
     {
+        /// <summary>
+        /// Indicates whether the packet is encrypted.
+        /// </summary>
         IsEncrypted
     }
 
@@ -34,6 +48,10 @@ public class AesChannel : ProcessionChannel
     private readonly Aes _aes = Aes.Create();
     private readonly object _lock = new();
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="AesChannel"/> wrapping the specified channel.
+    /// </summary>
+    /// <param name="channel">The underlying channel to wrap.</param>
     public AesChannel(IChannel channel)
         : base(channel)
     {
@@ -42,6 +60,11 @@ public class AesChannel : ProcessionChannel
     private byte[]? _key;
     private byte[]? _iv;
 
+    /// <summary>
+    /// Sets the AES encryption key and initialization vector.
+    /// </summary>
+    /// <param name="key">The AES key, or <see langword="null"/> to disable encryption.</param>
+    /// <param name="iv">The AES initialization vector, or <see langword="null"/> to disable encryption.</param>
     public void SetKey(byte[]? key, byte[]? iv)
     {
         lock (_lock)

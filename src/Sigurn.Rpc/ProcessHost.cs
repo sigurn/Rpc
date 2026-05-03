@@ -4,6 +4,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Hosts a process channel using the standard input and output streams of the current process.
+/// </summary>
 public class ProcessHost : IDisposable, IChannelHost
 {
     private static readonly ILogger _logger = RpcLogging.CreateLogger<ProcessHost>();
@@ -18,23 +21,39 @@ public class ProcessHost : IDisposable, IChannelHost
     private IChannel? _channel;
     private volatile bool _isOpened = false;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ProcessHost"/> with default protocol and channel factories.
+    /// </summary>
     public ProcessHost()
     {
         _isOpened = false;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ProcessHost"/> with a custom channel factory.
+    /// </summary>
+    /// <param name="channelFactory">The factory used to wrap the accepted channel.</param>
     public ProcessHost(Func<IChannel, IChannel> channelFactory)
         : this ()
     {
         _channelFactory = channelFactory;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ProcessHost"/> with a custom protocol factory.
+    /// </summary>
+    /// <param name="protocolFactory">The factory used to create the protocol for the channel.</param>
     public ProcessHost(Func<IProtocol> protocolFactory)
         : this ()
     {
         _protocolFactory = protocolFactory;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ProcessHost"/> with custom protocol and channel factories.
+    /// </summary>
+    /// <param name="protocolFactory">The factory used to create the protocol for the channel.</param>
+    /// <param name="channelFactory">The factory used to wrap the accepted channel.</param>
     public ProcessHost(Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
         : this ()
     {
@@ -42,11 +61,17 @@ public class ProcessHost : IDisposable, IChannelHost
         _channelFactory = channelFactory;
     }
 
+    /// <summary>
+    /// Closes the host and releases all resources.
+    /// </summary>
     public void Dispose()
     {
         Close();
     }
 
+    /// <summary>
+    /// Gets a value indicating whether the host is currently open.
+    /// </summary>
     public bool IsOpened
     {
         get
@@ -62,6 +87,9 @@ public class ProcessHost : IDisposable, IChannelHost
         }
     }
 
+    /// <summary>
+    /// Opens the host, redirects standard I/O to the channel, and notifies when a connection is established.
+    /// </summary>
     public void Open()
     {
         using var _ = _logger.Scope();
@@ -86,6 +114,9 @@ public class ProcessHost : IDisposable, IChannelHost
         _logger.LogDebug("Channel host is opened");
     }
 
+    /// <summary>
+    /// Closes the host and the underlying process channel.
+    /// </summary>
     public void Close()
     {
         using var _ = _logger.Scope();
@@ -117,7 +148,14 @@ public class ProcessHost : IDisposable, IChannelHost
         }
     }
 
+    /// <summary>
+    /// Occures when a client connects via the process channel.
+    /// </summary>
     public event EventHandler<ChannelEventArgs>? Connected;
+
+    /// <summary>
+    /// Occures when the client disconnects or the channel faults.
+    /// </summary>
     public event EventHandler<ChannelEventArgs>? Disconnected;
 
     private void OnConnected(IChannel baseChannel)

@@ -25,6 +25,11 @@
 /// </remarks>
 public interface IPacket
 {
+    /// <summary>
+    /// Creates a new packet with the specified data payload.
+    /// </summary>
+    /// <param name="data">The payload data.</param>
+    /// <returns>A new <see cref="IPacket"/> instance.</returns>
     public static IPacket Create(byte[] data)
     {
         return new Infrastructure.Packet(data);
@@ -50,8 +55,17 @@ public interface IPacket
 }
 
 
+/// <summary>
+/// Provides extension methods for <see cref="IPacket"/>.
+/// </summary>
 public static class PacketExtensions
 {
+    /// <summary>
+    /// Creates a new packet that inherits the properties of the source packet and uses the specified data as payload.
+    /// </summary>
+    /// <param name="sourcePacket">The packet whose properties are copied to the new packet.</param>
+    /// <param name="data">The payload data for the new packet.</param>
+    /// <returns>A new packet with the copied properties and the specified data.</returns>
     public static IPacket CreateAnswer(this IPacket sourcePacket, byte[] data)
     {
         var res = new Infrastructure.Packet(data);

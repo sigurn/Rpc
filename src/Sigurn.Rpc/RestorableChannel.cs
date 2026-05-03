@@ -2,6 +2,9 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Implements <see cref="IChannel"/> with automatic reconnection support using a sequence of channel factories.
+/// </summary>
 public class RestorableChannel : IChannel
 {
     private readonly object _lock = new ();
@@ -13,6 +16,10 @@ public class RestorableChannel : IChannel
     private bool _isReopening = false;
     private Task? _reopeningTask = null;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="RestorableChannel"/> with the specified channel factories.
+    /// </summary>
+    /// <param name="channelFactories">The ordered sequence of channel factories tried during connection and reconnection.</param>
     public RestorableChannel(params Func<CancellationToken, Task<IChannel>>[] channelFactories)
     {
         ArgumentNullException.ThrowIfNull(channelFactories);
@@ -24,6 +31,10 @@ public class RestorableChannel : IChannel
             throw new ArgumentException("Cannot get a factory from provided channel factories", nameof(channelFactories));
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="RestorableChannel"/> with the specified sequence of channel factories.
+    /// </summary>
+    /// <param name="channelFactories">The ordered sequence of channel factories tried during connection and reconnection.</param>
     public RestorableChannel(IEnumerable<Func<CancellationToken, Task<IChannel>>> channelFactories)
     {
         ArgumentNullException.ThrowIfNull(channelFactories);
@@ -36,6 +47,9 @@ public class RestorableChannel : IChannel
     }
 
     private bool _autoReopen = true;
+    /// <summary>
+    /// Gets or sets a value indicating whether the channel should automatically reconnect after a fault.
+    /// </summary>
     public bool AutoReopen
     {
         get
@@ -52,6 +66,9 @@ public class RestorableChannel : IChannel
     }
 
     private TimeSpan _reopenInterval = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// Gets or sets the interval between reconnection attempts. Must be at least 1 second.
+    /// </summary>
     public TimeSpan ReopenInterval
     {
         get
@@ -71,6 +88,9 @@ public class RestorableChannel : IChannel
     }
 
     private bool _resetOnSuccess;
+    /// <summary>
+    /// Gets or sets a value indicating whether the factory iterator resets to the beginning after a successful connection.
+    /// </summary>
     public bool ResetOnSuccess
     {
         get
@@ -87,6 +107,9 @@ public class RestorableChannel : IChannel
     }
 
     private ChannelState _state;
+    /// <summary>
+    /// Gets or sets the current state of the channel.
+    /// </summary>
     public ChannelState State
     {
         get
@@ -103,6 +126,11 @@ public class RestorableChannel : IChannel
     }
 
     private object? _boundObject = null;
+    /// <summary>
+    /// An object associated with the channel.
+    /// </summary>
+    /// <remarks>Developer can associate any object with the channel for any purposes.
+    /// This object is not processed by channel in any way.</remarks>
     public object? BoundObject
     { 
         get
@@ -120,6 +148,10 @@ public class RestorableChannel : IChannel
 
     private CancellationTokenSource? _openCancellationSource;
     private Task? _openTask;
+    /// <summary>
+    /// Opens the channel asynchronously, trying the configured factories in sequence.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task OpenAsync(CancellationToken cancellationToken)
     {
         using ManualResetEvent startEvent = new ManualResetEvent(false);
@@ -186,6 +218,10 @@ public class RestorableChannel : IChannel
         }
     }
 
+    /// <summary>
+    /// Closes the channel asynchronously and stops any active reconnection attempt.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
         CancellationTokenSource? openCancellationToken = null;
@@ -257,6 +293,11 @@ public class RestorableChannel : IChannel
         }
     }
 
+    /// <summary>
+    /// Receives a packet from the current underlying channel asynchronously.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The received packet.</returns>
     public Task<IPacket> ReceiveAsync(CancellationToken cancellationToken)
     {
         IChannel? channel;
@@ -273,6 +314,12 @@ public class RestorableChannel : IChannel
         return channel.ReceiveAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Sends a packet through the current underlying channel asynchronously.
+    /// </summary>
+    /// <param name="packet">The packet to send.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The packet that was sent.</returns>
     public async Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
     {
         IChannel? channel;
@@ -290,6 +337,9 @@ public class RestorableChannel : IChannel
     }
 
     private EventHandler? _opening;
+    /// <summary>
+    /// Occures when the channel is opening.
+    /// </summary>
     public event EventHandler Opening
     {
         add
@@ -305,6 +355,9 @@ public class RestorableChannel : IChannel
     }
 
     private EventHandler? _opened;
+    /// <summary>
+    /// Occures when the channel is opened.
+    /// </summary>
     public event EventHandler Opened
     {
         add
@@ -321,6 +374,9 @@ public class RestorableChannel : IChannel
     }
 
     private EventHandler? _closing;
+    /// <summary>
+    /// Occures when the channel is closing.
+    /// </summary>
     public event EventHandler Closing
     {
         add
@@ -337,6 +393,9 @@ public class RestorableChannel : IChannel
     }
 
     private EventHandler? _closed;
+    /// <summary>
+    /// Occures when the channel is closed.
+    /// </summary>
     public event EventHandler Closed
     {
         add
@@ -353,6 +412,9 @@ public class RestorableChannel : IChannel
     }
 
     private EventHandler? _faulted;
+    /// <summary>
+    /// Occures when the channel is in the faulted state.
+    /// </summary>
     public event EventHandler Faulted
     {
         add

@@ -6,6 +6,9 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Implements an SSL/TLS communication channel.
+/// </summary>
 public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChannel
 {
     private readonly IPEndPoint _endPoint;
@@ -37,6 +40,11 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         State = ChannelState.Opened;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SslChannel"/> that connects to the specified endpoint with a certificate validator.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
+    /// <param name="certificateValidator">The callback to validate the remote certificate.</param>
     public SslChannel(IPEndPoint endPoint, Func<X509Certificate?, X509Chain?, bool> certificateValidator)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -47,6 +55,12 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         _socket = null;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SslChannel"/> that connects to the specified endpoint with an optional certificate validator and a custom protocol.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
+    /// <param name="certificateValidator">The callback to validate the remote certificate, or <see langword="null"/> to use default validation.</param>
+    /// <param name="protocol">The protocol implementation to use.</param>
     public SslChannel(IPEndPoint endPoint, Func<X509Certificate?, X509Chain?, bool>? certificateValidator, IProtocol protocol)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -58,6 +72,13 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         _socket = null;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SslChannel"/> that connects to the specified endpoint with a client certificate, optional validator, and custom protocol.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
+    /// <param name="certificateValidator">The callback to validate the remote certificate, or <see langword="null"/> to use default validation.</param>
+    /// <param name="certificate">The client certificate to present during authentication.</param>
+    /// <param name="protocol">The protocol implementation to use.</param>
     public SslChannel(IPEndPoint endPoint, Func<X509Certificate?, X509Chain?, bool>? certificateValidator, X509Certificate certificate, IProtocol protocol)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -70,6 +91,12 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         _socket = null;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SslChannel"/> that connects to the specified endpoint with a client certificate and custom protocol.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
+    /// <param name="certificate">The client certificate to present during authentication.</param>
+    /// <param name="protocol">The protocol implementation to use.</param>
     public SslChannel(IPEndPoint endPoint, X509Certificate certificate, IProtocol protocol)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -81,6 +108,10 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         _socket = null;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SslChannel"/> that connects to the specified endpoint using the default protocol and no client certificate.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
     public SslChannel(IPEndPoint endPoint)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -88,6 +119,9 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         _socket = null;
     }
 
+    /// <summary>
+    /// Gets the local endpoint of the channel.
+    /// </summary>
     public IPEndPoint LocalEndPoint
     {
         get
@@ -97,6 +131,9 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         }
     }
 
+    /// <summary>
+    /// Gets the remote endpoint of the connected channel.
+    /// </summary>
     public IPEndPoint RemoteEndPoint
     {
         get
@@ -124,6 +161,9 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         }
     }
     
+    /// <summary>
+    /// Gets or sets the server name used for SSL authentication. Required when connecting as a client.
+    /// </summary>
     public string? ServerName
     {
         get
@@ -139,6 +179,9 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         }
     }
 
+    /// <summary>
+    /// Gets the certificate provided by the remote party during SSL authentication, or <see langword="null"/> if not authenticated.
+    /// </summary>
     public X509Certificate2? RemoteCertificate
     {
         get

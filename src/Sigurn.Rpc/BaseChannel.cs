@@ -11,6 +11,9 @@ static class TaskHelpers
     }
 }
 
+/// <summary>
+/// Provides a base implementation for communication channels with thread-safe state management.
+/// </summary>
 public abstract class BaseChannel : IChannel, IDisposable
 {
     private static readonly ILogger<BaseChannel> _logger = RpcLogging.CreateLogger<BaseChannel>();
@@ -31,6 +34,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     {
     }
 
+    /// <summary>
+    /// Releases resources used by the channel.
+    /// </summary>
     public void Dispose()
     {
         lock (_lock)
@@ -43,6 +49,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private ChannelState _state;
+    /// <summary>
+    /// Gets or sets the current state of the channel.
+    /// </summary>
     public ChannelState State
     {
         get
@@ -59,6 +68,11 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private object? _boundObject = null;
+    /// <summary>
+    /// An object associated with the channel.
+    /// </summary>
+    /// <remarks>Developer can associate any object with the channel for any purposes.
+    /// This object is not processed by channel in any way.</remarks>
     public object? BoundObject
     {
         get
@@ -74,6 +88,10 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
     }
 
+    /// <summary>
+    /// Closes the communication channel asynchronously.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
         using var _ = _logger.Scope();
@@ -158,6 +176,10 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
     }
 
+    /// <summary>
+    /// Opens the communication channel asynchronously.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task OpenAsync(CancellationToken cancellationToken)
     {
         using var _ = _logger.Scope();
@@ -216,6 +238,11 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
     }
 
+    /// <summary>
+    /// Receives a packet from the channel asynchronously.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The received packet.</returns>
     public async Task<IPacket> ReceiveAsync(CancellationToken cancellationToken)
     {
         Task<IPacket> task;
@@ -247,6 +274,12 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
     }
 
+    /// <summary>
+    /// Sends a packet through the channel asynchronously.
+    /// </summary>
+    /// <param name="packet">The packet to send.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The packet that was sent.</returns>
     public async Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
     {
         Task<IPacket> task;
@@ -279,6 +312,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private EventHandler? _opening;
+    /// <summary>
+    /// Occures when the channel is opening.
+    /// </summary>
     public event EventHandler Opening
     {
         add
@@ -294,6 +330,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private EventHandler? _opened;
+    /// <summary>
+    /// Occures when the channel is opened.
+    /// </summary>
     public event EventHandler Opened
     {
         add
@@ -310,6 +349,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private EventHandler? _closing;
+    /// <summary>
+    /// Occures when the channel is closing.
+    /// </summary>
     public event EventHandler Closing
     {
         add
@@ -326,6 +368,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private EventHandler? _closed;
+    /// <summary>
+    /// Occures when the channel is closed.
+    /// </summary>
     public event EventHandler Closed
     {
         add
@@ -342,6 +387,9 @@ public abstract class BaseChannel : IChannel, IDisposable
     }
 
     private EventHandler? _faulted;
+    /// <summary>
+    /// Occures when the channel is in the faulted state.
+    /// </summary>
     public event EventHandler Faulted
     {
         add

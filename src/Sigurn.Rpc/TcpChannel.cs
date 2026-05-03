@@ -3,6 +3,9 @@ using System.Net.Sockets;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Implements a TCP/IP communication channel.
+/// </summary>
 public class TcpChannel : BaseChannel, IAddressableChannel
 {
     private readonly IPEndPoint _endPoint;
@@ -24,6 +27,11 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         State = ChannelState.Opened;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="TcpChannel"/> that connects to the specified endpoint using the given protocol.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
+    /// <param name="protocol">The protocol implementation to use.</param>
     public TcpChannel(IPEndPoint endPoint, IProtocol protocol)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -34,6 +42,10 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         _socket = null;
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="TcpChannel"/> that connects to the specified endpoint using the default protocol.
+    /// </summary>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
     public TcpChannel(IPEndPoint endPoint)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -41,6 +53,9 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         _socket = null;
     }
 
+    /// <summary>
+    /// Gets the local endpoint of the channel.
+    /// </summary>
     public IPEndPoint LocalEndPoint
     {
         get
@@ -50,6 +65,9 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         }
     }
 
+    /// <summary>
+    /// Gets the remote endpoint of the connected channel.
+    /// </summary>
     public IPEndPoint RemoteEndPoint
     {
         get

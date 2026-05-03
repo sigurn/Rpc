@@ -2,6 +2,9 @@ using System.Collections.Immutable;
 
 namespace Sigurn.Rpc;
 
+/// <summary>
+/// Implements the default channel protocol that frames packets with a start marker, version, length, and CRC checksums.
+/// </summary>
 public class ChannelProtocol : IProtocol
 {
     private readonly ImmutableArray<byte> _startMarker = [0xA5, 0xB6, 0xC7, 0xD8];
@@ -47,8 +50,14 @@ public class ChannelProtocol : IProtocol
 
     private ReceiveError _receiveError;
 
+    /// <summary>
+    /// Gets or sets the maximum allowed packet size in bytes. Packets exceeding this size are rejected.
+    /// </summary>
     public int MaxPacketSize = 0x100000;
 
+    /// <summary>
+    /// Gets a value indicating whether a sending operation is currently in progress.
+    /// </summary>
     public bool IsSending
     { 
         get
@@ -58,8 +67,11 @@ public class ChannelProtocol : IProtocol
         }
     }
 
+    /// <summary>
+    /// Gets a value indicating whether a receiving operation is currently in progress.
+    /// </summary>
     public bool IsReceiving
-    { 
+    {
         get
         {
             lock(_sendLock)
@@ -67,6 +79,10 @@ public class ChannelProtocol : IProtocol
         }
     }
 
+    /// <summary>
+    /// Starts a sending operation with the specified data.
+    /// </summary>
+    /// <param name="data">The raw data to frame and send.</param>
     public void StartSending(ReadOnlySpan<byte> data)
     {
         lock(_sendLock)
@@ -79,6 +95,10 @@ public class ChannelProtocol : IProtocol
         }
     }
 
+    /// <summary>
+    /// Returns the next framed block of data to transmit, or <see langword="null"/> when all blocks have been produced.
+    /// </summary>
+    /// <returns>The next block to send, or <see langword="null"/> when sending is complete.</returns>
     public byte[]? GetNextBlockToSend()
     {
         lock(_sendLock)
@@ -127,6 +147,9 @@ public class ChannelProtocol : IProtocol
         }
     }
 
+    /// <summary>
+    /// Completes the current sending operation.
+    /// </summary>
     public void EndSending()
     {
         lock(_sendLock)
@@ -139,6 +162,10 @@ public class ChannelProtocol : IProtocol
         }
     }
 
+    /// <summary>
+    /// Starts a receiving operation and returns the size of the first block to read.
+    /// </summary>
+    /// <returns>The number of bytes to read for the first block.</returns>
     public int StartReceiving()
     {
         lock(_receiveLock)
@@ -155,6 +182,11 @@ public class ChannelProtocol : IProtocol
         return 1;
     }
 
+    /// <summary>
+    /// Processes the next received data block and returns the size of the next block to read, or zero when receiving is complete.
+    /// </summary>
+    /// <param name="data">The received data block.</param>
+    /// <returns>The number of bytes to read for the next block, or zero when all data has been received.</returns>
     public int ApplyNextReceivedBlock(ReadOnlySpan<byte> data)
     {
         lock(_receiveLock)
@@ -295,6 +327,10 @@ public class ChannelProtocol : IProtocol
         }
     }
 
+    /// <summary>
+    /// Completes the current receiving operation and returns the assembled payload.
+    /// </summary>
+    /// <returns>The fully received data payload.</returns>
     public byte[] EndReceiving()
     {
         lock(_receiveLock)
