@@ -14,6 +14,7 @@ Sigurn.Rpc is designed with simplicity in mind, allowing you to use standard .NE
 - **Lifetime management**: Flexible object creation strategies (ShareWithin scopes)
 - **Channel chains**: Compose channels for encryption, compression, logging, etc.
 - **Full async support**: Built on async/await from the ground up
+- **Async service hosting**: Modern `IAsyncRunnable`-based hosting with pluggable acceptor factories
 - **Events and properties**: Remote events and properties just work
 - **Session management**: Track and manage client sessions with custom state
 - **Service discovery**: Query available services at runtime
@@ -375,6 +376,98 @@ static async Task Main(string[] args)
    ```
 
 ## Advanced Topics
+
+### Async Service Hosting
+
+The library provides a fully async hosting model built around three concepts:
+
+- **`IAsyncChannelAcceptor`** — returned by each `*HostAsync.Open()` call. Calling `AcceptAsync(ct)` suspends until the next incoming connection arrives. Implements `IAsyncDisposable`.
+- **`IAsyncRunnable`** — implemented by `ServiceHostAsync`. `RunAsync(ct)` accepts connections from all configured acceptors and runs until the cancellation token is cancelled.
+- **`ProcessTermination`** — provides `ProcessTermination.CancellationToken`, a token that is automatically cancelled when the process receives SIGINT (Ctrl+C) or SIGTERM.
+
+#### Basic TCP Server
+
+```csharp
+using Sigurn.Rpc;
+using System.Net;
+
+var host = new ServiceHostAsync(
+    () => TcpHostAsync.Open(new IPEndPoint(IPAddress.Any, 5000))
+);
+
+host.RegisterSerive<IHelloService>(ShareWithin.Session, () => new HelloService());
+host.PublishServicesCatalog = true;
+
+await host.RunAsync(ProcessTermination.CancellationToken);
+```
+
+#### Process Server (stdin/stdout)
+
+```csharp
+var host = new ServiceHostAsync(() => ProcessHostAsync.Open());
+host.RegisterSerive<IHelloService>(ShareWithin.Session, () => new HelloService());
+await host.RunAsync(ProcessTermination.CancellationToken);
+```
+
+When the connected client disconnects, `ProcessHostAsync` automatically calls `ProcessTermination.Cancel`, which stops `RunAsync` cleanly.
+
+#### Listening on Multiple Endpoints
+
+Pass multiple acceptor factories — `ServiceHostAsync` accepts from all of them concurrently:
+
+```csharp
+var host = new ServiceHostAsync(
+    () => TcpHostAsync.Open(new IPEndPoint(IPAddress.Any, 5000)),
+    () => TcpHostAsync.Open(new IPEndPoint(IPAddress.Any, 5001))
+);
+```
+
+#### Channel Middleware with Async Hosting
+
+`TcpHostAsync.Open` accepts an optional `channelFactory` delegate for wrapping each accepted channel:
+
+```csharp
+using Sigurn.Rpc.Channels;
+
+var host = new ServiceHostAsync(
+    () => TcpHostAsync.Open(
+        new IPEndPoint(IPAddress.Any, 5000),
+        channel =>
+        {
+            var aes = new AesChannel(channel);
+            aes.SetKey(myAesKey, myAesIV);
+            return aes;
+        }
+    )
+);
+await host.RunAsync(ProcessTermination.CancellationToken);
+```
+
+#### Connected / Disconnected Events
+
+`ServiceHostAsync` exposes the same session-lifecycle events as `ServiceHost`:
+
+```csharp
+host.Connected += (s, e) => Console.WriteLine($"Client connected: {e.Channel}");
+host.Disconnected += (s, e) => Console.WriteLine($"Client disconnected: {e.Channel}");
+```
+
+#### `TcpHostAsync` Overloads
+
+| Method | Description |
+|--------|-------------|
+| `TcpHostAsync.Open()` | Listen on `DefaultEndPoint` (any:35768) |
+| `TcpHostAsync.Open(IPEndPoint)` | Listen on the specified endpoint |
+| `TcpHostAsync.Open(IPEndPoint, channelFactory)` | Listen with a channel middleware factory |
+| `TcpHostAsync.Open(IPEndPoint, channelFactory, protocolFactory)` | Full control over channel and protocol |
+
+#### `ProcessHostAsync` Overloads
+
+| Method | Description |
+|--------|-------------|
+| `ProcessHostAsync.Open()` | Accept a single connection via stdin/stdout |
+| `ProcessHostAsync.Open(channelFactory)` | Accept with a channel middleware factory |
+| `ProcessHostAsync.Open(channelFactory, protocolFactory)` | Full control over channel and protocol |
 
 ### Object Lifetime Management (ShareWithin)
 
