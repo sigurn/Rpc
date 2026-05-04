@@ -692,6 +692,39 @@ var client = new RpcClient(async ct =>
 });
 ```
 
+#### Async SSL Server
+
+Use `SslHostAsync` with `ServiceHostAsync` for a fully async SSL server:
+
+```csharp
+var certificate = new X509Certificate2("server.pfx", "password");
+
+var host = new ServiceHostAsync(
+    () => SslHostAsync.Open(new IPEndPoint(IPAddress.Any, 5001), certificate)
+);
+
+host.RegisterSerive<IHelloService>(ShareWithin.Session, () => new HelloService());
+await host.RunAsync(ProcessTermination.CancellationToken);
+```
+
+For mutual TLS (requiring and validating client certificates):
+
+```csharp
+var host = new ServiceHostAsync(
+    () => SslHostAsync.Open(
+        new IPEndPoint(IPAddress.Any, 5001),
+        certificate,
+        certificateValidator: (cert, chain) => ValidateClientCert(cert, chain),
+        requireClientCertificate: true,
+        channelFactory: channel => channel,
+        protocolFactory: () => new ChannelProtocol()
+    )
+);
+await host.RunAsync(ProcessTermination.CancellationToken);
+```
+
+The client side is the same in both cases — use `SslChannel` as shown above.
+
 ### Creating Custom Channels
 
 #### Custom Transport Channel
