@@ -7,7 +7,7 @@ namespace Sigurn.Rpc;
 /// <summary>
 /// Provides process termination support by listening for OS signals (SIGINT, SIGTERM) and exposing a cancellation token.
 /// </summary>
-public class ProcessTermination
+public static class ProcessTermination
 {
     private static readonly ILogger<ProcessTermination> _logger = RpcLogging.CreateLogger<ProcessTermination>();
 
