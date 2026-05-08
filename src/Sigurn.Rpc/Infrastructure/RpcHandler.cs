@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data;
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
 
@@ -7,6 +8,8 @@ namespace Sigurn.Rpc.Infrastructure;
 
 class RpcHandler : IDisposable
 {
+    private static readonly ILogger<RpcHandler> _logger = RpcLogging.CreateLogger<RpcHandler>();
+
     private static int _instanceCounter;
 
     private static int GetInstanceId()
@@ -379,8 +382,9 @@ class RpcHandler : IDisposable
                         tasks.Remove(t);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Error during RPC packet handling");
                 continue;
             }
         }
