@@ -8,5 +8,5 @@ public interface IChainedChannel : IChannel
     /// <summary>
     /// Gets the underlying base channel being decorated.
     /// </summary>
-    IChannel BaseChannel { get; }
+    IChannel? BaseChannel { get; }
 }
