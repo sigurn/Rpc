@@ -5,7 +5,7 @@ namespace Sigurn.Rpc;
 /// <summary>
 /// Implements <see cref="IChannel"/> with automatic reconnection support using a sequence of channel factories.
 /// </summary>
-public class RestorableChannel : IChannel
+public class RestorableChannel : IChainedChannel
 {
     private readonly object _lock = new ();
     private readonly IEnumerable<Func<CancellationToken, Task<IChannel>>> _channelFactories;
@@ -143,6 +143,15 @@ public class RestorableChannel : IChannel
         {
             lock(_lock)
                 _boundObject = value;
+        }
+    }
+
+    IChannel? IChainedChannel.BaseChannel
+    {
+        get
+        {
+            lock(_lock)
+                return _channel;
         }
     }
 
