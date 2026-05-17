@@ -72,10 +72,6 @@ public static class ProcessHostAsync
 
         protected override async Task InternalDispose()
         {
-            if (_channel is IAsyncDisposable ad)
-                await ad.DisposeAsync();
-            else if (_channel is IDisposable d)
-                d.Dispose();
         }
     }
 

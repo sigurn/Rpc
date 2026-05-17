@@ -128,6 +128,11 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
 
         await DisposeInstances(instances);
+
+        if (_channel is IAsyncDisposable ad)
+            await ad.DisposeAsync();
+        else if (_channel is IDisposable d)
+            d.Dispose();
     }
 
     public void Dispose()
@@ -162,6 +167,11 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         foreach (var instance in instances)
             instance.Dispose();
+
+        if (_channel is IDisposable d)
+            d.Dispose();
+        else if (_channel is IAsyncDisposable ad)
+            ad.DisposeAsync().AsTask().Wait();
     }
 
     private async Task DisposeInstances(IEnumerable<RefCounter<ICallTarget>> instances)
