@@ -9,7 +9,7 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
 
     public bool IsAccepting => Interlocked.Exchange(ref _isAccepting, _isAccepting);
 
-    public async Task<IChannel> AcceptAsync(CancellationToken cancellationToken)
+    public async Task<IChannel?> AcceptAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref _isDisposed, _isDisposed))
             throw new InvalidOperationException("The object is already disposed");
@@ -35,7 +35,7 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
         await InternalDispose();
     }
 
-    protected abstract Task<IChannel> Accept(CancellationToken cancellationToken);
+    protected abstract Task<IChannel?> Accept(CancellationToken cancellationToken);
 
     protected abstract Task InternalDispose();
 }

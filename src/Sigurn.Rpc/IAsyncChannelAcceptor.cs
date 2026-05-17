@@ -14,6 +14,6 @@ public interface IAsyncChannelAcceptor : IAsyncDisposable
     /// Waits for and accepts the next incoming channel connection asynchronously.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The accepted channel.</returns>
-    public Task<IChannel> AcceptAsync(CancellationToken cancellationToken);
+    /// <returns>The accepted channel or null if there is nothing to accept and work is finished.</returns>
+    public Task<IChannel?> AcceptAsync(CancellationToken cancellationToken);
 }

@@ -24,7 +24,7 @@ public static class ProcessHostAsync
             _protocolFactory = protocolFactory;
         }
 
-        protected override async Task<IChannel> Accept(CancellationToken cancellationToken)
+        protected override async Task<IChannel?> Accept(CancellationToken cancellationToken)
         {
             using var _ = _logger.Scope();
 
@@ -32,11 +32,7 @@ public static class ProcessHostAsync
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (channel is not null)
-            {
-                await cancellationToken.WaitForCancellationAsync();
-                throw new OperationCanceledException();
-            }
+            if (channel is not null) return null;
                 
             var inputStream = Console.OpenStandardInput();
             var outputStream = Console.OpenStandardOutput();
