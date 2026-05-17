@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
@@ -15,7 +16,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
     private static readonly Dictionary<Type, RefCounter<ICallTarget>> _globalInstances = new();
 
-    private readonly Func<IAsyncChannelAcceptor>[] _factories;
+    private readonly ConcurrentDictionary<Guid, Func<IAsyncChannelAcceptor>> _factories = new ();
 
     private readonly Dictionary<Type, ServiceData> _services = new();
 
@@ -25,18 +26,15 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
     private readonly Lazy<IServiceCatalog> _serviceCatalog;
 
-    private volatile bool _isRunning = false;
+    private TaskCompletionSource? _tcs;
+    private readonly List<Func<IAsyncChannelAcceptor>> _newFactories = new();
 
     /// <summary>
     /// Initializes a new instance of <see cref="ServiceHostAsync"/> with the specified acceptor factories.
     /// </summary>
-    /// <param name="factories">The acceptor factories that provide incoming channel connections.</param>
-    public ServiceHostAsync(params Func<IAsyncChannelAcceptor>[] factories)
+    public ServiceHostAsync()
     {
-        ArgumentNullException.ThrowIfNull(factories);
-
         _serviceCatalog = new Lazy<IServiceCatalog>(CreateServiceCatalog);
-        _factories = factories;
     }
 
     /// <summary>
@@ -47,7 +45,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         get
         {
             lock(_sessions)
-                return _isRunning;
+                return _tcs is not null;
         }
     }
 
@@ -57,69 +55,60 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     /// <param name="cancellationToken">Cancellation token used to stop the host.</param>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        List<Task> tasks = new ();
+        Task cancellationTask = cancellationToken.WaitForCancellationAsync();
+        Task eventTask;
+
         lock(_sessions)
         {
-            if (_isRunning) throw new InvalidOperationException("The service host is already running");
-            _isRunning = true;
-        }
+            if (_tcs is not null)
+                throw new InvalidOperationException("The service host is already running");
 
-        var acceptors = _factories.Select(x => x()).ToArray();
+            _tcs = new TaskCompletionSource();
+            eventTask = _tcs.Task;
+
+            tasks.Add(eventTask);
+            tasks.Add(cancellationTask);
+            tasks.AddRange(_factories.Values.Select(x => HandleConnectionsAsync(x, cancellationToken)));
+        }
 
         try
         {
-            List<Task<IChannel>> tasks = acceptors
-                .Select(x => x.AcceptAsync(cancellationToken))
-                .ToList();
-
             while(!cancellationToken.IsCancellationRequested && tasks.Count > 0)
             {
                 var task = await Task.WhenAny(tasks.ToImmutableArray());
-                if (task.IsCanceled)
-                {
-                    tasks.Remove(task);
-                    continue;
-                }
 
-                try
-                {
-                    var index = tasks.IndexOf(task);
-                    var acceptor = acceptors[index];
-                    if (task.IsFaulted)
-                    {
-                        _logger.LogError("Cannot accept connection. Exception {exception}", task.Exception);
-                    }
-                    else
-                    {
-                        var channel = task.Result;
-                        var session = new Session(new QueueChannel(channel), this);
-                        channel.BoundObject = session;
-
-                        lock (_sessions)
-                            _sessions.Add(session);
-
-                        OnConnected(session);
-
-                        channel.Closed += (s, e) => OnDisconnectd(session);
-                        channel.Faulted += (s, e) => OnDisconnectd(session);
-                    }
-    
-                    tasks[index] = acceptors[index].AcceptAsync(cancellationToken);
-                }
-                catch(TaskCanceledException)
-                {
+                if (task == cancellationTask)
                     return;
-                }
-                catch(Exception ex)
+
+                tasks.Remove(task);
+
+                if (task == eventTask)
                 {
-                    _logger.LogError("Connection failed. Exception {exception}", ex);
+                    Func<IAsyncChannelAcceptor>[] factories;
+                    lock(_sessions)
+                    {
+                        factories = _newFactories.ToArray();
+                        _newFactories.Clear();
+
+                        if (_tcs is null || _tcs.Task.IsCompleted)
+                            _tcs = new TaskCompletionSource();
+
+                        eventTask = _tcs.Task;
+                        tasks.Add(eventTask);
+                    }
+
+                    tasks.AddRange(factories.Select(x => HandleConnectionsAsync(x, cancellationToken)));
+                }
+
+                if (task.IsFaulted)
+                {
+                    _logger.LogError("Connection handling is faulted. Exception {exception}", task.Exception);                    
                 }
             }            
         }
         finally
         {
-            foreach(var a in acceptors)
-                await a.DisposeAsync();
-
             Session[] sessions;
 
             lock(_sessions)
@@ -127,7 +116,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 sessions = _sessions.ToArray();
                 _sessions.Clear();
 
-                _isRunning = false;
+                _tcs = null;
             }
 
             foreach(var s in sessions)
@@ -135,6 +124,31 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 await s.DisposeAsync();
             }
         }
+    }
+
+    public IDisposable RegisterAcceptor(Func<IAsyncChannelAcceptor> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        var key = Guid.NewGuid();
+        if (!_factories.TryAdd(key, factory))
+            throw new InvalidOperationException("Cannot register acceptor factory");
+
+        var res = Disposable.Create(() =>
+        {
+           _factories.TryRemove(key, out _); 
+        });
+        
+        lock(_sessions)
+        {
+            if (_tcs is not null)
+            {
+                _newFactories.Add(factory);
+                _tcs.TrySetResult();            
+            }
+        }
+
+        return res;
     }
 
     /// <summary>
@@ -296,5 +310,50 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     private IServiceCatalog CreateServiceCatalog()
     {
         return new ServiceCatalog(_services);
+    }
+
+    private async Task HandleConnectionsAsync(Func<IAsyncChannelAcceptor> factory, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        IAsyncChannelAcceptor acceptor;
+        try
+        {
+            acceptor = factory(); 
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError(ex, "Cannot create acceptor");
+            return;
+        }
+
+        try
+        {
+            while(!cancellationToken.IsCancellationRequested)
+            {
+                var channel = await acceptor.AcceptAsync(cancellationToken);
+                if (channel is null) return;
+
+                var session = new Session(new QueueChannel(channel), this);
+                channel.BoundObject = session;
+
+                lock (_sessions)
+                    _sessions.Add(session);
+
+                OnConnected(session);
+
+                channel.Closed += (s, e) => OnDisconnectd(session);
+                channel.Faulted += (s, e) => OnDisconnectd(session);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();            
+        }
+        finally
+        {
+            if (acceptor is IAsyncDisposable ad)
+                await ad.DisposeAsync();
+            else if (acceptor is IDisposable d)
+                d.Dispose();
+        }
     }
 }
