@@ -17,7 +17,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -94,7 +95,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -161,7 +163,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();        
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -238,7 +241,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -324,7 +328,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -425,7 +430,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -525,7 +531,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -610,7 +617,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -694,7 +702,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -777,7 +786,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -860,7 +870,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try
@@ -920,7 +931,8 @@ public class ServiceHostAsyncTests
 
         var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
         var endPointReady = new TaskCompletionSource<IPEndPoint?>();
-        var sh = new ServiceHostAsync(() =>
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
         {
             var acceptor = TcpHostAsync.Open(endPoint);
             try

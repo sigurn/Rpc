@@ -30,11 +30,12 @@ static class Program
     
         RpcLogging.Configure(new SerilogLoggerFactory(Log.Logger));
 
-        var host = new ServiceHostAsync(() => ProcessHostAsync.Open())
+        var host = new ServiceHostAsync()
         {
             PublishServicesCatalog = true
         };
 
+        host.RegisterAcceptor(() => ProcessHostAsync.Open());
         host.RegisterSerive<ITestProcess>(ShareWithin.Host, () =>
         {
             return new TestProcessService(() => ProcessTermination.Cancel("Canceled by service request"));
