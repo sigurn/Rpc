@@ -1,28 +1,27 @@
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
 /// <summary>
-/// Hosts RPC services over a synchronous channel host, managing sessions and service instances.
+/// Hosts RPC services over a synchronous channel host. This is a thin synchronous
+/// facade over <see cref="ServiceHostAsync"/>: incoming channels raised by the
+/// <see cref="IChannelHost"/> are bridged into the asynchronous host, which owns
+/// session lifecycle and disconnect handling. Reusing <see cref="ServiceHostAsync"/>
+/// avoids disposing a channel synchronously from its own Faulted/Closed event
+/// (which would self-deadlock on the receive loop).
 /// </summary>
 public class ServiceHost : IServiceHost
 {
     private static readonly ILogger<ServiceHost> _logger = RpcLogging.CreateLogger<ServiceHost>();
 
-    private record struct ServiceData(ShareWithin Shared, Func<object> Factory);
-
-    private static readonly Dictionary<Type, RefCounter<ICallTarget>> _globalInstances = new();
-
     private readonly IChannelHost _host;
+    private readonly ServiceHostAsync _inner = new();
+    private readonly BridgeAcceptor _acceptor = new();
 
-    private readonly Dictionary<Type, ServiceData> _services = new();
-
-    private readonly Dictionary<Type, RefCounter<ICallTarget>> _hostInstances = new();
-
-    private readonly List<Session> _sessions = new();
-
-    private readonly Lazy<IServiceCatalog> _serviceCatalog;
+    private CancellationTokenSource? _cts;
+    private Task? _runTask;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ServiceHost"/> with the specified channel host.
@@ -32,11 +31,9 @@ public class ServiceHost : IServiceHost
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        _serviceCatalog = new Lazy<IServiceCatalog>(CreateServiceCatalog);
         _host = host;
-        _host.Connected += OnConnected;
-        _host.Disconnected += OnDisconnected;
-
+        _host.Connected += OnHostConnected;
+        _inner.RegisterAcceptor(() => _acceptor);
     }
 
     /// <summary>
@@ -46,7 +43,10 @@ public class ServiceHost : IServiceHost
     {
         using var _ = _logger.Scope();
         if (_host.IsOpened) return;
-        _host.Open();        
+
+        _cts = new CancellationTokenSource();
+        _runTask = _inner.RunAsync(_cts.Token);
+        _host.Open();
     }
 
     /// <summary>
@@ -56,18 +56,16 @@ public class ServiceHost : IServiceHost
     {
         using var _ = _logger.Scope();
         if (!_host.IsOpened) return;
+
         _host.Close();
 
-        Session[] sessions;
-        
-        lock (_sessions)
-            sessions = _sessions.ToArray();
+        _cts?.Cancel();
+        try { _runTask?.Wait(); }
+        catch (AggregateException) { }
 
-        var tasks = sessions
-            .Select(x => x.Channel.CloseAsync(CancellationToken.None))
-            .ToArray();
-
-        Task.WaitAll(tasks);
+        _cts?.Dispose();
+        _cts = null;
+        _runTask = null;
     }
 
     /// <summary>
@@ -77,146 +75,73 @@ public class ServiceHost : IServiceHost
     /// <param name="share">The scope within which service instances are shared.</param>
     /// <param name="factory">The factory used to create service instances.</param>
     public void RegisterSerive<T>(ShareWithin share, Func<T> factory) where T : class
-    {
-        using var _ = _logger.Scope();
+        => _inner.RegisterSerive(share, factory);
 
-        if (!typeof(T).IsInterface)
-            throw new ArgumentException("Type must be an interface");
-
-        ArgumentNullException.ThrowIfNull(factory);
-
-        lock (_services)
-        {
-            if (_services.ContainsKey(typeof(T)))
-                throw new ArgumentException($"Service with type {typeof(T)} is already registered.");
-
-            _services.Add(typeof(T), new ServiceData(Shared: share, Factory: () => factory()));
-            _logger.LogInformation("Registered service '{type}', shared within {share}", typeof(T), share);
-        }
-    }
-
-    private volatile bool _publishServicesCatalog = false;
     /// <summary>
     /// Gets or sets a value indicating whether the service catalog is published and discoverable by clients.
     /// </summary>
     public bool PublishServicesCatalog
     {
-        get
-        {
-            lock (_services)
-                return _publishServicesCatalog;
-        }
-        set
-        {
-            lock (_services)
-                _publishServicesCatalog = value;
-        }
+        get => _inner.PublishServicesCatalog;
+        set => _inner.PublishServicesCatalog = value;
     }
 
-    private void OnConnected(object? sender, ChannelEventArgs args)
+    private void OnHostConnected(object? sender, ChannelEventArgs args)
     {
-        if (sender is null ||
-            args.Channel is null ||
-            args.Channel.State != ChannelState.Opened) return;
+        if (args.Channel is null || args.Channel.State != ChannelState.Opened)
+            return;
 
-        var session = new Session(new QueueChannel(args.Channel), (IChannelHost)sender, this);
-        args.Channel.BoundObject = session;
-
-        lock (_sessions)
-            _sessions.Add(session);
-    }
-
-    private void OnDisconnected(object? sender, ChannelEventArgs args)
-    {
-        if (args is null || args.Channel is null || args.Channel.BoundObject is not Session session) return;
-
-        lock (_sessions)
-            _sessions.Remove(session);
-
-        args.Channel.BoundObject = null;
-
-        session.Dispose();
+        _acceptor.Enqueue(args.Channel);
     }
 
     (ShareWithin Shared, Func<object> Factory) IServiceHost.GetServiceInfo(Type type)
-    {
-        lock (_services)
-        {
-            if (type == typeof(IServiceCatalog) && _publishServicesCatalog)
-                return (ShareWithin.Host, () => _serviceCatalog.Value);
-
-            if (_services.TryGetValue(type, out var serviceData))
-                return (serviceData.Shared, serviceData.Factory);
-
-            throw new Exception($"Unknown service {type}");
-        }
-    }
+        => ((IServiceHost)_inner).GetServiceInfo(type);
 
     Type? IServiceHost.FindTypeById(Guid id)
-    {
-        Type[] types;
-        lock (_services)
-        {
-            if (typeof(IServiceCatalog).GUID == id && _publishServicesCatalog)
-                return typeof(IServiceCatalog);
-
-            types = _services.Keys.ToArray();
-        }
-
-        return types.Where(x => x.GUID == id).FirstOrDefault();
-    }
+        => ((IServiceHost)_inner).FindTypeById(id);
 
     RefCounter<ICallTarget> IServiceHost.CreateHostInstance(Type type, Func<ICallTarget> factory)
-    {
-        return CreateInstance(type, factory, _hostInstances);
-    }
+        => ((IServiceHost)_inner).CreateHostInstance(type, factory);
 
     RefCounter<ICallTarget> IServiceHost.CreateGlobalInstance(Type type, Func<ICallTarget> factory)
-    {
-        return CreateInstance(type, factory, _globalInstances);
-    }
+        => ((IServiceHost)_inner).CreateGlobalInstance(type, factory);
 
-    private static RefCounter<ICallTarget> CreateInstance(Type type, Func<ICallTarget> factory, Dictionary<Type, RefCounter<ICallTarget>> storage)
+    /// <summary>
+    /// Bridges channels raised by a synchronous <see cref="IChannelHost"/> into the
+    /// asynchronous accept loop of <see cref="ServiceHostAsync"/>.
+    /// </summary>
+    private sealed class BridgeAcceptor : IAsyncChannelAcceptor
     {
-        lock (storage)
+        private readonly Channel<IChannel> _queue = Channel.CreateUnbounded<IChannel>();
+
+        public bool IsAccepting => true;
+
+        public void Enqueue(IChannel channel) => _queue.Writer.TryWrite(channel);
+
+        public async Task<IChannel?> AcceptAsync(CancellationToken cancellationToken)
         {
-            if (!storage.TryGetValue(type, out var refCounter))
+            try
             {
-                refCounter = new RefCounter<ICallTarget>(factory(), x =>
-                {
-                    lock (storage)
-                    {
-                        if (storage.ContainsKey(type))
-                            storage.Remove(type);
-                    }
-
-                    if (x is IDisposable d) d.Dispose();
-                });
-                storage.Add(type, refCounter);
+                return await _queue.Reader.ReadAsync(cancellationToken);
             }
-
-            return refCounter;
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+            catch (ChannelClosedException)
+            {
+                return null;
+            }
         }
-    }
 
-    private class ServiceCatalog : IServiceCatalog
-    {
-        private readonly Dictionary<Type, ServiceData> _services;
+        public Func<IChannel, CancellationToken, Task<bool>>? SetChannelValidator(Func<IChannel, CancellationToken, Task<bool>>? validator)
+            => null;
 
-        public ServiceCatalog(Dictionary<Type, ServiceData> services)
+        public ValueTask DisposeAsync()
         {
-            _services = services;
+            // The acceptor is reused across Start/Stop cycles, so the queue must
+            // outlive a single accept loop. The loop is stopped via cancellation.
+            return ValueTask.CompletedTask;
         }
-        
-        public Task<IReadOnlyList<ServiceInfo>> GetServicesAsync(CancellationToken cancellationToken)
-        {
-            lock (_services)
-                return Task.FromResult<IReadOnlyList<ServiceInfo>>(_services.Select(x => ServiceInfo.Create(x.Key, x.Value.Shared)).ToList());
-        }
-    }
-
-    private IServiceCatalog CreateServiceCatalog()
-    {
-        return new ServiceCatalog(_services);
     }
 }

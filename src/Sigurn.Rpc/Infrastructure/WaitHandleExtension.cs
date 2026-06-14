@@ -42,85 +42,48 @@ static class WaitHandleExtensions
 
         if (channel.State == state) return;
 
-        TaskCompletionSource tcs = new ();
-        var waitTask = cancellationToken
-            .WaitForCancellationAsync()
-            .ContinueWith(t => tcs.TrySetCanceled());
+        TaskCompletionSource tcs = new (TaskCreationOptions.RunContinuationsAsynchronously);
 
-        void handler(object? sender, EventArgs args)
+        void handler(object? sender, EventArgs args) => tcs.TrySetResult();
+
+        void Subscribe()
         {
-            tcs.SetResult();
+            switch (state)
+            {
+                case ChannelState.Opening: channel.Opening += handler; break;
+                case ChannelState.Opened: channel.Opened += handler; break;
+                case ChannelState.Closing: channel.Closing += handler; break;
+                case ChannelState.Closed: channel.Closed += handler; break;
+                case ChannelState.Faulted: channel.Faulted += handler; break;
+                default: throw new ArgumentOutOfRangeException($"Unsupported state {state}");
+            }
         }
 
-        switch(state)
+        void Unsubscribe()
         {
-            case ChannelState.Opening:
-                try
-                {
-                    channel.Opening += handler;
-                    await tcs.Task;
-                }
-                finally
-                {
-                    channel.Opening -= handler;
-                    waitTask.Dispose();
-                }
-                break;
+            switch (state)
+            {
+                case ChannelState.Opening: channel.Opening -= handler; break;
+                case ChannelState.Opened: channel.Opened -= handler; break;
+                case ChannelState.Closing: channel.Closing -= handler; break;
+                case ChannelState.Closed: channel.Closed -= handler; break;
+                case ChannelState.Faulted: channel.Faulted -= handler; break;
+            }
+        }
 
-            case ChannelState.Opened:
-                try
-                {
-                    channel.Opened += handler;
-                    await tcs.Task;
-                }
-                finally
-                {
-                    channel.Opened -= handler;
-                    waitTask.Dispose();
-                }
-                break;
+        using var ctr = cancellationToken.Register(static s => ((TaskCompletionSource)s!).TrySetCanceled(), tcs);
 
-            case ChannelState.Closing:
-                try
-                {
-                    channel.Closing += handler;
-                    await tcs.Task;
-                }
-                finally
-                {
-                    channel.Closing -= handler;
-                    waitTask.Dispose();
-                }
-                break;
-
-            case ChannelState.Closed:
-                try
-                {
-                    channel.Closed += handler;
-                    await tcs.Task;
-                }
-                finally
-                {
-                    channel.Closed -= handler;
-                    waitTask.Dispose();
-                }
-                break;
-
-            case ChannelState.Faulted:
-                try
-                {
-                    channel.Faulted += handler;
-                    await tcs.Task;
-                }
-                finally
-                {
-                    channel.Faulted -= handler;
-                    waitTask.Dispose();
-                }
-                break;
-            
-            default:
-                throw new ArgumentOutOfRangeException($"Unsupported state {state}");
+        Subscribe();
+        try
+        {
+            // Re-check after subscribing to close the race where the channel reaches
+            // the target state between the initial check and the subscription.
+            if (channel.State == state) tcs.TrySetResult();
+            await tcs.Task;
+        }
+        finally
+        {
+            Unsubscribe();
         }
     }
 }

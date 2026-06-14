@@ -119,7 +119,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _adapters.Clear();
         }
 
-        await DisposeInstances(instances);
+        // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
+        // A shared (Host/Process) instance lives as one RefCounter across every
+        // session, so disposing it directly here would destroy it while other
+        // sessions still hold references — Release disposes only at the last one.
+        foreach (var instance in instances)
+            instance.Release();
 
         lock (_sessionInstances)
         {
@@ -156,8 +161,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _adapters.Clear();
         }
 
+        // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
+        // A shared (Host/Process) instance lives as one RefCounter across every
+        // session, so disposing it directly here would destroy it while other
+        // sessions still hold references — Release disposes only at the last one.
         foreach (var instance in instances)
-            instance.Dispose();
+            instance.Release();
 
         lock (_sessionInstances)
         {

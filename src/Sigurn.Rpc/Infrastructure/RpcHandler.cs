@@ -199,6 +199,14 @@ class RpcHandler : IDisposable
 
     public async Task ReleaseServiceInstanceAsync(Guid instanceId, CancellationToken cancellationToken)
     {
+        // Releasing an instance is a best-effort notification to the remote side.
+        // When the channel is not opened (typically the disconnect that triggered the
+        // session teardown) there is no remote instance to release, so skip the send.
+        // A restorable channel that reconnects gets a brand new remote session, so the
+        // old instance id would be meaningless there anyway.
+        if (_channel.State != ChannelState.Opened)
+            return;
+
         var request = new ReleaseInstancePacket
         {
             InstanceId = instanceId
