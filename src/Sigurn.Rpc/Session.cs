@@ -21,16 +21,16 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     private readonly object? _host;
     private readonly RpcHandler _handler;
 
-    private readonly Dictionary<Type, RefCounter<ICallTarget>> _sessionInstances = new();
-    private readonly Dictionary<object, RefCounter<ICallTarget>> _instances = new();
+    private readonly Dictionary<Type, RefCounter<ICallTarget>> _sessionInstances = [];
+    private readonly Dictionary<object, RefCounter<ICallTarget>> _instances = [];
 
-    private readonly Dictionary<Guid, RefCounter<ICallTarget>> _adapters = new();
-    private readonly Dictionary<Guid, RefCounter<ICallTarget>> _proxies = new();
+    private readonly Dictionary<Guid, RefCounter<ICallTarget>> _adapters = [];
+    private readonly Dictionary<Guid, RefCounter<ICallTarget>> _proxies = [];
 
     private readonly IServiceHost? _serviceHost = null;
     private readonly SerializationContext _context;
 
-    private readonly Dictionary<Enum, (object? Value, object? Password)> _properties = new();
+    private readonly Dictionary<Enum, (object? Value, object? Password)> _properties = [];
 
     private volatile int _isDisposed = 0;
 
@@ -115,7 +115,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         lock (_adapters)
         {
-            instances = _adapters.Values.ToArray();
+            instances = [.. _adapters.Values];
             _adapters.Clear();
         }
 
@@ -123,7 +123,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         lock (_sessionInstances)
         {
-            instances = _sessionInstances.Values.ToArray();
+            instances = [.. _sessionInstances.Values];
             _sessionInstances.Clear();
         }
 
@@ -143,7 +143,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         lock (_proxies)
         {
-            instances = _proxies.Values.ToArray();
+            instances = [.. _proxies.Values];
             _proxies.Clear();
         }
 
@@ -152,7 +152,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         lock (_adapters)
         {
-            instances = _adapters.Values.ToArray();
+            instances = [.. _adapters.Values];
             _adapters.Clear();
         }
 
@@ -161,7 +161,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         lock (_sessionInstances)
         {
-            instances = _sessionInstances.Values.ToArray();
+            instances = [.. _sessionInstances.Values];
             _sessionInstances.Clear();
         }
 
@@ -174,10 +174,15 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             ad.DisposeAsync().AsTask().Wait();
     }
 
-    private async Task DisposeInstances(IEnumerable<RefCounter<ICallTarget>> instances)
+    private static async ValueTask DisposeInstances(IEnumerable<RefCounter<ICallTarget>> instances)
     {
         var tasks = instances
-            .Select(i => Task.Run(() => i.Dispose()));
+            .Select(i =>
+            {
+                if (i is IAsyncDisposable ad)
+                    return ad.DisposeAsync().AsTask();
+                return Task.Run(() => i.Dispose());
+            });
 
         if (tasks is null) return;
 
@@ -280,8 +285,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
     private void CheckDisposed()
     {
-        if (_isDisposed != 0)
-            throw new ObjectDisposedException($"Session {Id}");
+        ObjectDisposedException.ThrowIf(_isDisposed != 0, $"Session {Id}");
     }
 
     private RefCounter<ICallTarget> CreateSessionInstance(Type type, Func<object> factory)
@@ -486,21 +490,19 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 }
                 else if (request is MethodCallPacket mcp)
                 {
-                    var instance = GetAdapter(mcp.InstanceId);
-                    if (instance is null)
+                    var instance = GetAdapter(mcp.InstanceId) ??
                         throw new Exception("Unknown instance");
-
-                    var result = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken);
+                    
+                    var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken);
                     return new MethodResultPacket(mcp)
                     {
-                        Result = result.Result,
-                        Args = result.Args
+                        Result = Result,
+                        Args = Args
                     };
                 }
                 else if (request is GetPropertyPacket gpp)
                 {
-                    var instance = GetAdapter(gpp.InstanceId);
-                    if (instance is null)
+                    var instance = GetAdapter(gpp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
                     var value = await instance.GetPropertyValueAsync(gpp.PropertyId, cancellationToken);
@@ -511,8 +513,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 }
                 else if (request is SetPropertyPacket spp)
                 {
-                    var instance = GetAdapter(spp.InstanceId);
-                    if (instance is null)
+                    var instance = GetAdapter(spp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
                     await instance.SetPropertyValueAsync(spp.PropertyId, spp.Value, cancellationToken);
@@ -520,19 +521,17 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 }
                 else if (request is SubscribeForEventPacket sfep)
                 {
-                    var instance = GetAdapter(sfep.InstanceId);
-                    if (instance is null)
+                    var instance = GetAdapter(sfep.InstanceId) ??
                         throw new Exception("Unknown instance");
-
+                        
                     await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken);
                     return new SuccessPacket(sfep);
                 }
                 else if (request is UnsubscribeFromEventPacket ufep)
                 {
-                    var instance = GetAdapter(ufep.InstanceId);
-                    if (instance is null)
+                    var instance = GetAdapter(ufep.InstanceId) ??
                         throw new Exception("Unknown instance");
-
+                        
                     await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken);
                     return new SuccessPacket(ufep);
                 }

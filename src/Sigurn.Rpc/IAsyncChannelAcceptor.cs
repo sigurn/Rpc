@@ -16,4 +16,10 @@ public interface IAsyncChannelAcceptor : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The accepted channel or null if there is nothing to accept and work is finished.</returns>
     public Task<IChannel?> AcceptAsync(CancellationToken cancellationToken);
+
+    ///<summary>
+    /// Sets channel validator which is executed as soon as new connection is established.
+    /// </summary>
+    /// </returns>Previously set validator. This allows to create validator chains.</returns>
+    public Func<IChannel, CancellationToken, Task<bool>>? SetChannelValidator(Func<IChannel, CancellationToken, Task<bool>>? validator);
 }

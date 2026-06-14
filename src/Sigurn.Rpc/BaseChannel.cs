@@ -14,7 +14,7 @@ static class TaskHelpers
 /// <summary>
 /// Provides a base implementation for communication channels with thread-safe state management.
 /// </summary>
-public abstract class BaseChannel : IChannel, IDisposable
+public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 {
     private static readonly ILogger<BaseChannel> _logger = RpcLogging.CreateLogger<BaseChannel>();
 
@@ -46,6 +46,19 @@ public abstract class BaseChannel : IChannel, IDisposable
         }
 
         Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        lock (_lock)
+        {
+            if (_isDisposed) return;
+            _isDisposed = true;
+        }
+
+        await DisposeAsync(true);
+        GC.SuppressFinalize(this);
     }
 
     private ChannelState _state;
@@ -407,7 +420,13 @@ public abstract class BaseChannel : IChannel, IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
+        DisposeAsync(disposing).AsTask().Wait();
+    }
 
+    protected async virtual ValueTask DisposeAsync(bool disposing)
+    {
+        if (!disposing) return;
+        await CloseAsync(CancellationToken.None);
     }
 
     protected void RaiseOpening()

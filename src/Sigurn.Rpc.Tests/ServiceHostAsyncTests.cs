@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 using Sigurn.Rpc.Infrastructure;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
@@ -8,6 +9,153 @@ namespace Sigurn.Rpc.Tests;
 public class ServiceHostAsyncTests
 {
     private CancellationToken CurrentToken => TestContext.Current.CancellationToken;
+
+    [Fact(Timeout = 15000)]
+    public async Task ConnectToServiceHost()
+    {
+        List<string> log = new ();
+        using ManualResetEvent destroyEvent = new (false);
+        using AutoResetEvent logEvent = new (false);
+
+        var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        var endPointReady = new TaskCompletionSource<IPEndPoint?>();
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
+        {
+            var acceptor = TcpHostAsync.Open(endPoint);
+            try
+            {
+                if (acceptor is ILocalAddress la)
+                {
+                    endPointReady.SetResult(IPEndPoint.Parse(la.LocalAddress));            }
+                else
+                {
+                    endPointReady.SetResult(null);
+                }
+            }
+            catch(Exception ex)
+            {
+                endPointReady.SetException(ex);
+            }
+
+            return acceptor;
+        });
+        
+        sh.Connected += (s,e) => 
+        {
+            log.AddWithLock("Connected");
+            logEvent.Set();
+        };
+
+        sh.Disconnected += (s,e) => 
+        {
+            log.AddWithLock("Disconnected");
+            logEvent.Set();
+        };
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
+
+        var runTask = sh.RunAsync(cts.Token);
+
+        var client = new TcpChannel(await endPointReady.Task ?? throw new Exception("Address is not awailable"));
+
+        await client.OpenAsync(CurrentToken);
+
+        Assert.True(logEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.Equal(["Connected"], log.ToImmutableArrayWithLock());
+
+        await client.CloseAsync(CurrentToken);
+
+        Assert.True(logEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.Equal(["Connected", "Disconnected"], log.ToImmutableArrayWithLock());
+
+        cts.Cancel();
+        await runTask;
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task ConnectToServiceRejectConnectionHost()
+    {
+        List<string> log = new ();
+        using ManualResetEvent destroyEvent = new (false);
+        using AutoResetEvent logEvent = new (false);
+
+        var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        var endPointReady = new TaskCompletionSource<IPEndPoint?>();
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
+        {
+            bool isRejected = false;
+            var acceptor = TcpHostAsync.Open(endPoint);
+            acceptor.SetChannelValidator(async (c, ct) =>
+            {
+                if (!isRejected)
+                {
+                    isRejected = true;
+                    return false;
+                }
+                return true;
+            });
+            
+            try
+            {
+                if (acceptor is ILocalAddress la)
+                {
+                    endPointReady.SetResult(IPEndPoint.Parse(la.LocalAddress));            }
+                else
+                {
+                    endPointReady.SetResult(null);
+                }
+            }
+            catch(Exception ex)
+            {
+                endPointReady.SetException(ex);
+            }
+
+            return acceptor;
+        });
+        
+        sh.Connected += (s,e) => 
+        {
+            log.AddWithLock("Connected");
+            logEvent.Set();
+        };
+
+        sh.Disconnected += (s,e) => 
+        {
+            log.AddWithLock("Disconnected");
+            logEvent.Set();
+        };
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
+
+        var runTask = sh.RunAsync(cts.Token);
+
+        var client = new RpcClient(async (ct) =>
+        {
+            return new TcpChannel(await endPointReady.Task ?? throw new Exception("Address is not awailable"));
+        });
+        client.AutoReopen = false;
+
+        await client.OpenAsync(CurrentToken);
+        await client.WaitForState(ChannelState.Faulted, CurrentToken);
+        Assert.Equal(ChannelState.Faulted, client.State);
+        await client.CloseAsync(CurrentToken);
+
+        await client.OpenAsync(CurrentToken);
+        Assert.Equal(ChannelState.Opened, client.State);
+
+        Assert.True(logEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.Equal(["Connected"], log.ToImmutableArrayWithLock());
+
+        await client.CloseAsync(CurrentToken);
+
+        Assert.True(logEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.Equal(["Connected", "Disconnected"], log.ToImmutableArrayWithLock());
+
+        cts.Cancel();
+        await runTask;
+    }
 
     [Fact(Timeout = 15000)]
     public async Task CreateDestroyServiceInstance()

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
@@ -14,20 +13,21 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
     private record struct ServiceData(ShareWithin Shared, Func<object> Factory);
 
-    private static readonly Dictionary<Type, RefCounter<ICallTarget>> _globalInstances = new();
+    private static readonly Dictionary<Type, RefCounter<ICallTarget>> _globalInstances = [];
 
-    private readonly ConcurrentDictionary<Guid, Func<IAsyncChannelAcceptor>> _factories = new ();
+    private readonly List<Func<IAsyncChannelAcceptor>> _factories = [];
 
-    private readonly Dictionary<Type, ServiceData> _services = new();
+    private readonly Dictionary<Type, ServiceData> _services = [];
 
-    private readonly Dictionary<Type, RefCounter<ICallTarget>> _hostInstances = new();
+    private readonly Dictionary<Type, RefCounter<ICallTarget>> _hostInstances = [];
 
-    private readonly List<Session> _sessions = new();
+    private readonly List<Session> _sessions = [];
 
     private readonly Lazy<IServiceCatalog> _serviceCatalog;
 
     private TaskCompletionSource? _tcs;
-    private readonly List<Func<IAsyncChannelAcceptor>> _newFactories = new();
+    private readonly List<Func<IAsyncChannelAcceptor>> _newFactories = [];
+
 
     /// <summary>
     /// Initializes a new instance of <see cref="ServiceHostAsync"/> with the specified acceptor factories.
@@ -55,7 +55,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     /// <param name="cancellationToken">Cancellation token used to stop the host.</param>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        List<Task> tasks = new ();
+        List<Task> tasks = [];
         Task cancellationTask = cancellationToken.WaitForCancellationAsync();
         Task eventTask;
 
@@ -69,7 +69,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
             tasks.Add(eventTask);
             tasks.Add(cancellationTask);
-            tasks.AddRange(_factories.Values.Select(x => HandleConnectionsAsync(x, cancellationToken)));
+            tasks.AddRange(_factories.Select(x => HandleConnectionsAsync(x, cancellationToken)));
         }
 
         try
@@ -88,7 +88,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                     Func<IAsyncChannelAcceptor>[] factories;
                     lock(_sessions)
                     {
-                        factories = _newFactories.ToArray();
+                        factories = [.. _newFactories];
                         _newFactories.Clear();
 
                         if (_tcs is null || _tcs.Task.IsCompleted)
@@ -103,7 +103,8 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
                 if (task.IsFaulted)
                 {
-                    _logger.LogError("Connection handling is faulted. Exception {exception}", task.Exception);                    
+                    if (_logger.IsEnabled(LogLevel.Error))
+                        _logger.LogError("Connection handling is faulted. Exception {exception}", task.Exception);                    
                 }
             }            
         }
@@ -113,7 +114,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
             lock(_sessions)
             {
-                sessions = _sessions.ToArray();
+                sessions = [.. _sessions];
                 _sessions.Clear();
 
                 _tcs = null;
@@ -121,6 +122,9 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
             foreach(var s in sessions)
             {
+                if (Disconnected is not null)
+                    Disconnected(this, new SessionEventArgs(s));
+                    
                 await s.DisposeAsync();
             }
         }
@@ -130,17 +134,13 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        var key = Guid.NewGuid();
-        if (!_factories.TryAdd(key, factory))
-            throw new InvalidOperationException("Cannot register acceptor factory");
-
-        var res = Disposable.Create(() =>
-        {
-           _factories.TryRemove(key, out _); 
-        });
-        
         lock(_sessions)
         {
+            if (_factories.Contains(factory))
+                throw new InvalidOperationException("The factory is already registered");
+
+            _factories.Add(factory);
+
             if (_tcs is not null)
             {
                 _newFactories.Add(factory);
@@ -148,7 +148,11 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
             }
         }
 
-        return res;
+        return Disposable.Create(() =>
+        {
+            lock(_sessions)
+                _factories.Remove(factory); 
+        });
     }
 
     /// <summary>
@@ -172,7 +176,9 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 throw new ArgumentException($"Service with type {typeof(T)} is already registered.");
 
             _services.Add(typeof(T), new ServiceData(Shared: share, Factory: () => factory()));
-            _logger.LogInformation("Registered service '{type}', shared within {share}", typeof(T), share);
+
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Registered service '{type}', shared within {share}", typeof(T), share);
         }
     }
 
@@ -197,12 +203,12 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     /// <summary>
     /// Occures when a client connects and a new session is created.
     /// </summary>
-    public event EventHandler<ChannelEventArgs>? Connected;
+    public event EventHandler<SessionEventArgs>? Connected;
 
     /// <summary>
     /// Occures when a client disconnects and the associated session is disposed.
     /// </summary>
-    public event EventHandler<ChannelEventArgs>? Disconnected;
+    public event EventHandler<SessionEventArgs>? Disconnected;
 
     (ShareWithin Shared, Func<object> Factory) IServiceHost.GetServiceInfo(Type type)
     {
@@ -226,7 +232,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
             if (typeof(IServiceCatalog).GUID == id && _publishServicesCatalog)
                 return typeof(IServiceCatalog);
 
-            types = _services.Keys.ToArray();
+            types = [.. _services.Keys];
         }
 
         return types.Where(x => x.GUID == id).FirstOrDefault();
@@ -244,28 +250,28 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
     private void OnConnected(Session session)
     {
-        if (Connected is null) return;
-        Connected(this, new ChannelEventArgs(session.Channel));
+        lock(_sessions)
+            _sessions.Add(session);
+
+        if (Connected is not null)
+            Connected(this, new SessionEventArgs(session));
     }
 
-    private void OnDisconnectd(Session session)
+    private void OnDisconnected(Session session)
     {
-        var channel = session.Channel;
+        // A single disconnect can raise both Closed and Faulted, so guard against
+        // handling the same session more than once. Remove() returns false when the
+        // session was already removed by an earlier notification.
+        lock(_sessions)
+        {
+            if (!_sessions.Remove(session))
+                return;
+        }
 
         if (Disconnected is not null)
-            Disconnected(this, new ChannelEventArgs(channel));
+            Disconnected(this, new SessionEventArgs(session));
 
-        channel.BoundObject = null;
-
-        lock(_sessions)
-            _sessions.Remove(session);
-        
-        session.DisposeAsync().AsTask().Wait();
-
-        if (channel is IAsyncDisposable ad)
-            ad.DisposeAsync().AsTask().Wait();
-        else if (channel is IDisposable d)
-            d.Dispose();
+        session.Dispose();
     }
 
     private static RefCounter<ICallTarget> CreateInstance(Type type, Func<ICallTarget> factory, Dictionary<Type, RefCounter<ICallTarget>> storage)
@@ -277,11 +283,8 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 refCounter = new RefCounter<ICallTarget>(factory(), x =>
                 {
                     lock (storage)
-                    {
-                        if (storage.ContainsKey(type))
-                            storage.Remove(type);
-                    }
-
+                        storage.Remove(type);
+ 
                     if (x is IDisposable d) d.Dispose();
                 });
                 storage.Add(type, refCounter);
@@ -307,7 +310,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         }
     }
 
-    private IServiceCatalog CreateServiceCatalog()
+    private ServiceCatalog CreateServiceCatalog()
     {
         return new ServiceCatalog(_services);
     }
@@ -319,7 +322,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         IAsyncChannelAcceptor acceptor;
         try
         {
-            acceptor = factory(); 
+            acceptor = factory();
         }
         catch(Exception ex)
         {
@@ -334,16 +337,15 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 var channel = await acceptor.AcceptAsync(cancellationToken);
                 if (channel is null) return;
 
+                if (channel.State != ChannelState.Opened) continue;
+
                 var session = new Session(new QueueChannel(channel), this);
                 channel.BoundObject = session;
 
-                lock (_sessions)
-                    _sessions.Add(session);
+                channel.Closed += (s, e) => ThreadPool.QueueUserWorkItem(OnDisconnected, session, true);
+                channel.Faulted += (s, e) => ThreadPool.QueueUserWorkItem(OnDisconnected, session, true);
 
                 OnConnected(session);
-
-                channel.Closed += (s, e) => OnDisconnectd(session);
-                channel.Faulted += (s, e) => OnDisconnectd(session);
             }
 
             cancellationToken.ThrowIfCancellationRequested();            

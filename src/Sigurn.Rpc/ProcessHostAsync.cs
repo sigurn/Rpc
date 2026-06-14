@@ -13,14 +13,13 @@ public static class ProcessHostAsync
         private static readonly ILogger _logger = RpcLogging.CreateLogger<ProcessHost>();
 
         private readonly Func<IProtocol> _protocolFactory;
-        private readonly Func<IChannel, IChannel> _channelFactory;
 
         private IChannel? _channel;
 
 
         public ProcessAcceptor(Func<IChannel, IChannel> channelFactory, Func<IProtocol> protocolFactory)
+            : base (channelFactory)
         {
-            _channelFactory = channelFactory;
             _protocolFactory = protocolFactory;
         }
 
@@ -44,10 +43,9 @@ public static class ProcessHostAsync
             Console.SetOut(TextWriter.Null);
 
             var baseChannel = new ProcessChannel(outputStream, inputStream, _protocolFactory());
-            channel = _channelFactory(baseChannel);
+            channel = baseChannel;
 
-            EventHandler? handler = null;
-            handler = (object? sender, EventArgs args) =>
+            void handler(object? sender, EventArgs args)
             {
                 channel.Faulted -= handler;
                 channel.Closed -= handler;
@@ -57,15 +55,17 @@ public static class ProcessHostAsync
 
                 ProcessTermination.Cancel("Client is disconnected");
 
-                _logger.LogInformation("Client is disconnected. Channel: {channel}", channel);
-            };
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Client is disconnected. Channel: {channel}", channel);
+            }
 
             channel.Faulted += handler;
             channel.Closed += handler;
 
             Interlocked.Exchange(ref _channel, channel);
 
-            _logger.LogInformation("Client is connected. Channel: {baseChannel}", baseChannel);
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Client is connected. Channel: {baseChannel}", baseChannel);
 
             return channel;
         }

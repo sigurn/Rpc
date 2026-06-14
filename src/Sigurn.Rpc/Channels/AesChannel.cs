@@ -9,7 +9,7 @@ namespace Sigurn.Rpc.Channels;
 /// </summary>
 public class AesChannel : ProcessionChannel
 {
-    private static readonly AsyncLocal<bool?> _isEncryped = new AsyncLocal<bool?>();
+    private static readonly AsyncLocal<bool?> _isEncryped = new();
 
     /// <summary>
     /// Sets the encryption scope for the current async context, overriding the default encryption behavior.
@@ -45,7 +45,8 @@ public class AesChannel : ProcessionChannel
     }
 
     private static readonly byte[] _marker = [0x45, 0x4E, 0x43, 0x41, 0x45, 0x53, 0xF2, 0x7D, 0x8E, 0xFD];
-    private readonly Aes _aes = Aes.Create();
+    private static readonly Aes _aes = Aes.Create();
+    
     private readonly object _lock = new();
 
     /// <summary>

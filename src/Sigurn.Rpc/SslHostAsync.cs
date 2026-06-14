@@ -14,12 +14,12 @@ public static class SslHostAsync
     {
         private readonly Socket _socket;
         private readonly Func<IProtocol> _protocolFactory;
-        private readonly Func<IChannel, IChannel> _channelFactory;
         private readonly X509Certificate _certificate;
         private readonly Func<X509Certificate?, X509Chain?, bool>? _certificateValidator;
         private readonly bool _requireClientCertificate;
 
         public SslAcceptor(Socket socket, X509Certificate certificate, Func<X509Certificate?, X509Chain?, bool>? certificateValidator, bool requireClientCertificate, Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
+            : base(channelFactory)
         {
             ArgumentNullException.ThrowIfNull(socket);
             ArgumentNullException.ThrowIfNull(certificate);
@@ -31,17 +31,15 @@ public static class SslHostAsync
             _certificateValidator = certificateValidator;
             _requireClientCertificate = requireClientCertificate;
             _protocolFactory = protocolFactory;
-            _channelFactory = channelFactory;
         }
 
         public string LocalAddress => _socket?.LocalEndPoint?.ToString() ?? string.Empty;
 
-        protected override async Task<IChannel> Accept(CancellationToken cancellationToken)
+        protected override async Task<IChannel?> Accept(CancellationToken cancellationToken)
         {
             var socket = await _socket.AcceptAsync(cancellationToken);
-            var channel = _channelFactory(new SslChannel(socket, _certificate, _certificateValidator, _requireClientCertificate, _protocolFactory()));
-
-            return channel;
+            if (socket is null) return null;
+            return new SslChannel(socket, _certificate, _certificateValidator, _requireClientCertificate, _protocolFactory());
         }
 
         protected override Task InternalDispose()
@@ -59,7 +57,7 @@ public static class SslHostAsync
     /// <summary>
     /// Gets the default endpoint used when no endpoint is specified (<see cref="IPAddress.Any"/> on port 35768).
     /// </summary>
-    public static IPEndPoint DefaultEndPoint = new IPEndPoint(IPAddress.Any, 35768);
+    public static IPEndPoint DefaultEndPoint { get; } = new IPEndPoint(IPAddress.Any, 35768);
 
     /// <summary>
     /// Creates an SSL channel acceptor on the <see cref="DefaultEndPoint"/> with the specified server certificate.

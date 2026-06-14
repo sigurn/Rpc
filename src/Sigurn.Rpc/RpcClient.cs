@@ -5,15 +5,14 @@ namespace Sigurn.Rpc;
 /// <summary>
 /// Provides client-side RPC functionality over a restorable channel with automatic reconnection support.
 /// </summary>
-public class RpcClient : IDisposable, IAsyncDisposable
+public sealed class RpcClient : IDisposable, IAsyncDisposable
 {
     private readonly RestorableChannel _channel;
 
-    private readonly List<Task> _tasks = new();
+    private readonly List<Task> _tasks = [];
     private CancellationTokenSource? _cts;
 
     private readonly Session _session;
-
 
     /// <summary>
     /// Initializes a new instance of <see cref="RpcClient"/> with the specified channel factories.
@@ -104,7 +103,7 @@ public class RpcClient : IDisposable, IAsyncDisposable
 
         lock (_tasks)
         {
-            tasks = _tasks.ToArray();
+            tasks = [.. _tasks];
             _tasks.Clear();
             cts = _cts;
             _cts = null;
@@ -174,5 +173,10 @@ public class RpcClient : IDisposable, IAsyncDisposable
     {
         add => _channel.Faulted += value;
         remove => _channel.Faulted -= value;
+    }
+
+    public Task WaitForState(ChannelState state, CancellationToken cancellationToken)
+    {
+        return _channel.WaitForStateAsync(state, cancellationToken);
     }
 }

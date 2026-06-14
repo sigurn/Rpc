@@ -6,11 +6,13 @@ namespace Sigurn.Rpc.Tests;
 
 public class TcpChannelTests
 {
+    private static CancellationToken CurrentToken => TestContext.Current.CancellationToken;
+
     [Fact(Timeout = 15000)]
     public async Task ConnectTest()
     {
-        BlockingCollection<string> historyClient = new();
-        BlockingCollection<string> historyServer = new();
+        BlockingCollection<string> historyClient = [];
+        BlockingCollection<string> historyServer = [];
 
         using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
@@ -24,7 +26,7 @@ public class TcpChannelTests
                 serverChannel.Closing += (s, e) => historyServer.Add("Closing");
                 serverChannel.Closed += (s, e) => historyServer.Add("Closed");
                 serverChannel.Faulted += (s, e) => historyServer.Add("Faulted");
-                await serverChannel.ReceiveAsync(CancellationToken.None);
+                await serverChannel.ReceiveAsync(CurrentToken);
             }
             catch (Exception)
             {
@@ -32,9 +34,9 @@ public class TcpChannelTests
             }
 
             if (serverChannel is not null)
-                await serverChannel.CloseAsync(CancellationToken.None);
+                await serverChannel.CloseAsync(CurrentToken);
             serverChannel?.Dispose();
-        });
+        }, CurrentToken);
 
         Assert.NotNull(socket.LocalEndPoint);
 
@@ -69,10 +71,11 @@ public class TcpChannelTests
         var serverTask = Task.Run(async () =>
         {
             socket.Listen();
-            var clientSocket = await socket.AcceptAsync();
+            var clientSocket = await socket.AcceptAsync(CurrentToken);
+            clientSocket.Shutdown(SocketShutdown.Both);
             clientSocket.Close();
             clientSocket.Dispose();
-        });
+        }, CurrentToken);
 
         Assert.NotNull(socket.LocalEndPoint);
 
@@ -83,9 +86,9 @@ public class TcpChannelTests
         clientChannel.Closed += (s, e) => historyClient.Add("Closed");
         clientChannel.Faulted += (s, e) => historyClient.Add("Faulted");
 
-        await clientChannel.OpenAsync(CancellationToken.None);
+        await clientChannel.OpenAsync(CurrentToken);
         await serverTask;
-        await clientChannel.CloseAsync(CancellationToken.None);
+        await clientChannel.CloseAsync(CurrentToken);
 
         Assert.Equal(["Opening", "Opened", "Closing", "Closed"], historyClient);
     }
@@ -93,8 +96,8 @@ public class TcpChannelTests
     [Fact(Timeout = 15000)]
     public async Task SendReceiveTest()
     {
-        BlockingCollection<string> historyClient = new();
-        BlockingCollection<string> historyServer = new();
+        BlockingCollection<string> historyClient = [];
+        BlockingCollection<string> historyServer = [];
         byte[]? receivedPacket = null;
         byte[] sentPacket = [0x01, 0x02, 0x03, 0x04, 0x05];
 
@@ -110,8 +113,8 @@ public class TcpChannelTests
                 serverChannel.Closing += (s, e) => historyServer.Add("Closing");
                 serverChannel.Closed += (s, e) => historyServer.Add("Closed");
                 serverChannel.Faulted += (s, e) => historyServer.Add("Faulted");
-                var packet = await serverChannel.ReceiveAsync(CancellationToken.None);
-                receivedPacket = packet.Data.ToArray();
+                var packet = await serverChannel.ReceiveAsync(CurrentToken);
+                receivedPacket = [.. packet.Data];
             }
             catch (Exception)
             {
@@ -119,9 +122,9 @@ public class TcpChannelTests
             }
 
             if (serverChannel is not null)
-                await serverChannel.CloseAsync(CancellationToken.None);
+                await serverChannel.CloseAsync(CurrentToken);
             serverChannel?.Dispose();
-        });
+        }, CurrentToken);
 
         Assert.NotNull(socket.LocalEndPoint);
 
@@ -132,18 +135,72 @@ public class TcpChannelTests
         clientChannel.Closed += (s, e) => historyClient.Add("Closed");
         clientChannel.Faulted += (s, e) => historyClient.Add("Faulted");
 
-        await clientChannel.OpenAsync(CancellationToken.None);
-        await clientChannel.SendAsync(IPacket.Create(sentPacket), CancellationToken.None);
+        await clientChannel.OpenAsync(CurrentToken);
+        await clientChannel.SendAsync(IPacket.Create(sentPacket), CurrentToken);
 
         await serverTask;
 
-        await clientChannel.CloseAsync(CancellationToken.None);
+        await clientChannel.CloseAsync(CurrentToken);
 
         Assert.Equal(sentPacket, receivedPacket);
         Assert.Equal(["Opening", "Opened", "Closing", "Closed"], historyClient);
         Assert.Equal(["Closing", "Closed"], historyServer);
     }
 
+
+    [Fact(Timeout = 15000)]
+    public async Task CancelSendTest()
+    {
+        BlockingCollection<string> historyClient = [];
+        BlockingCollection<string> historyServer = [];
+        byte[] sentPacket = [0x01, 0x02, 0x03, 0x04, 0x05];
+
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var serverTask = Task.Run(async () =>
+        {
+            TcpChannel? serverChannel = null;
+            try
+            {
+                socket.Listen();
+                serverChannel = new TcpChannel(await socket.AcceptAsync(), new ChannelProtocol());
+                serverChannel.Closing += (s, e) => historyServer.Add("Closing");
+                serverChannel.Closed += (s, e) => historyServer.Add("Closed");
+                serverChannel.Faulted += (s, e) => historyServer.Add("Faulted");
+            }
+            catch (Exception)
+            {
+
+            }
+
+            if (serverChannel is not null)
+                await serverChannel.CloseAsync(CurrentToken);
+            serverChannel?.Dispose();
+        }, CurrentToken);
+
+        Assert.NotNull(socket.LocalEndPoint);
+
+        var clientChannel = new TcpChannel((IPEndPoint)socket.LocalEndPoint, new ChannelProtocol());
+        clientChannel.Opening += (s, e) => historyClient.Add("Opening");
+        clientChannel.Opened += (s, e) => historyClient.Add("Opened");
+        clientChannel.Closing += (s, e) => historyClient.Add("Closing");
+        clientChannel.Closed += (s, e) => historyClient.Add("Closed");
+        clientChannel.Faulted += (s, e) => historyClient.Add("Faulted");
+
+        await clientChannel.OpenAsync(CurrentToken);
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => {
+            await clientChannel.SendAsync(IPacket.Create(sentPacket), cts.Token);
+        });
+
+        await serverTask;
+
+        await clientChannel.CloseAsync(CurrentToken);
+
+        Assert.Equal(["Opening", "Opened", "Closing", "Closed"], historyClient);
+        Assert.Equal(["Closing", "Closed"], historyServer);
+    }
 
     [Fact(Timeout = 15000)]
     public async Task CancelReceiveTest()
@@ -154,12 +211,12 @@ public class TcpChannelTests
 
         Assert.NotNull(socket.LocalEndPoint);
 
-        var acceptTask = socket.AcceptAsync();
+        var acceptTask = socket.AcceptAsync(CurrentToken);
 
         var clientChannel = new TcpChannel((IPEndPoint)socket.LocalEndPoint, new ChannelProtocol());
-        await clientChannel.OpenAsync(CancellationToken.None);
+        await clientChannel.OpenAsync(CurrentToken);
 
-        CancellationTokenSource cts = new CancellationTokenSource();
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
         var receiveTask = clientChannel.ReceiveAsync(cts.Token);
         cts.Cancel();
 
@@ -167,7 +224,9 @@ public class TcpChannelTests
 
         using var servreSocket = await acceptTask;
 
-        await clientChannel.CloseAsync(CancellationToken.None);
+        Assert.Equal(ChannelState.Opened, clientChannel.State);
+        
+        await clientChannel.CloseAsync(CurrentToken);
     }
 
     [Fact(Timeout = 15000)]
@@ -179,17 +238,46 @@ public class TcpChannelTests
 
         Assert.NotNull(socket.LocalEndPoint);
 
-        var acceptTask = socket.AcceptAsync();
+        var acceptTask = socket.AcceptAsync(CurrentToken);
 
         var clientChannel = new TcpChannel((IPEndPoint)socket.LocalEndPoint, new ChannelProtocol());
-        await clientChannel.OpenAsync(CancellationToken.None);
+        await clientChannel.OpenAsync(CurrentToken);
         
-        CancellationTokenSource cts = new CancellationTokenSource();
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
         var receiveTask = clientChannel.ReceiveAsync(cts.Token);
-        await clientChannel.CloseAsync(CancellationToken.None);
+        await clientChannel.CloseAsync(CurrentToken);
         
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await receiveTask);
+        using var serverSocket = await acceptTask;
 
-        using var servreSocket = await acceptTask;
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await receiveTask);
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task ReceiveIsFailedOnServerCloseTest()
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        socket.Listen();
+
+        Assert.NotNull(socket.LocalEndPoint);
+
+        var acceptTask = socket.AcceptAsync(CurrentToken);
+
+        var clientChannel = new TcpChannel((IPEndPoint)socket.LocalEndPoint, new ChannelProtocol());
+        await clientChannel.OpenAsync(CurrentToken);
+        
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
+        var receiveTask = clientChannel.ReceiveAsync(cts.Token);
+
+        using var serverSocket = await acceptTask;
+        serverSocket.Shutdown(SocketShutdown.Both);
+        serverSocket.Close();
+        serverSocket.Dispose();
+
+        var ex = await Assert.ThrowsAsync<SocketException>(async () => await receiveTask);
+        Assert.Equal(SocketError.ConnectionAborted, ex.SocketErrorCode);
+        Assert.Equal(ChannelState.Faulted, clientChannel.State);
+
+        await clientChannel.CloseAsync(CurrentToken);
     }
 }

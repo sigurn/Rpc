@@ -323,7 +323,7 @@ class RpcHandler : IDisposable
 
     private async Task StartPacketHandling(CancellationToken cancellationToken)
     {
-        List<Task> tasks = new();
+        List<Task> tasks = [];
         while (!cancellationToken.IsCancellationRequested)
         {
             try

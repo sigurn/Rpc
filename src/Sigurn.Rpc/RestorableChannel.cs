@@ -5,9 +5,9 @@ namespace Sigurn.Rpc;
 /// <summary>
 /// Implements <see cref="IChannel"/> with automatic reconnection support using a sequence of channel factories.
 /// </summary>
-public class RestorableChannel : IChainedChannel
+public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 {
-    private readonly object _lock = new ();
+    private readonly Lock _lock = new ();
     private readonly IEnumerable<Func<CancellationToken, Task<IChannel>>> _channelFactories;
 
     private IEnumerator<Func<CancellationToken, Task<IChannel>>> _factories;
@@ -46,6 +46,16 @@ public class RestorableChannel : IChainedChannel
             throw new ArgumentException("Cannot get a factory from provided channel factories", nameof(channelFactories));
     }
 
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+    }
+
     private bool _autoReopen = true;
     /// <summary>
     /// Gets or sets a value indicating whether the channel should automatically reconnect after a fault.
@@ -79,10 +89,9 @@ public class RestorableChannel : IChainedChannel
 
         set
         {
-            if (value < TimeSpan.FromSeconds(1))
-                throw new ArgumentOutOfRangeException("Reopen interval cannot be less than 1 second.");
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.FromSeconds(1));
 
-            lock(_lock)
+            lock (_lock)
                 _reopenInterval = value;
         }
     }
@@ -163,7 +172,7 @@ public class RestorableChannel : IChainedChannel
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task OpenAsync(CancellationToken cancellationToken)
     {
-        using ManualResetEvent startEvent = new ManualResetEvent(false);
+        using var startEvent = new ManualResetEvent(false);
         Task<IChannel> task;
 
         lock(_lock)
@@ -178,8 +187,7 @@ public class RestorableChannel : IChainedChannel
             if (!_factories.MoveNext())
                 throw new Exception("There are no factories to open the client");
 
-            if (_openCancellationSource is not null)
-                _openCancellationSource.Dispose();
+            _openCancellationSource?.Dispose();
 
             _openCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             task = DelayedConnectToServerAsync(startEvent, _factories, _openCancellationSource.Token);
@@ -198,11 +206,8 @@ public class RestorableChannel : IChainedChannel
             lock(_lock)
             {
                 _openTask = null;
-                if (_openCancellationSource is not null)
-                {
-                    _openCancellationSource.Dispose();
-                    _openCancellationSource = null;
-                }
+                _openCancellationSource?.Dispose();
+                _openCancellationSource = null;
 
                 _channel = new QueueChannel(channel);
                 _cancellationSource = new CancellationTokenSource();
@@ -216,11 +221,8 @@ public class RestorableChannel : IChainedChannel
             lock(_lock)
             {
                 _openTask = null;
-                if (_openCancellationSource is not null)
-                {
-                    _openCancellationSource.Dispose();
-                    _openCancellationSource = null;
-                }
+                _openCancellationSource?.Dispose();
+                _openCancellationSource = null;
             }
             GoToFaultedState();
             throw;
@@ -277,8 +279,7 @@ public class RestorableChannel : IChainedChannel
 
         try
         {
-            if (cancellationTokenSource is not null)
-                cancellationTokenSource.Cancel();
+            cancellationTokenSource?.Cancel();
 
             if (reopeningTask is not null)
                 await reopeningTask;
@@ -545,9 +546,12 @@ public class RestorableChannel : IChainedChannel
                 if (factories.Current is null) continue;
                 var channel = await factories.Current(cancellationToken);
                 if (channel is null) continue;
+                if (channel.State == ChannelState.Created)
+                    await channel.OpenAsync(cancellationToken);
 
                 channel.Faulted += ChannelFaultedHandler;
                 channel.Closed += ChannelClosedHandler;
+                
                 return channel;
             }
             catch(Exception ex)

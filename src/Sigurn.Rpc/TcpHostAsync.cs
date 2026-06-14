@@ -16,6 +16,7 @@ public static class TcpHostAsync
         private readonly Func<IChannel, IChannel> _channelFactory;
 
         public TcpAcceptor(Socket socket, Func<IProtocol> protocolFactory, Func<IChannel, IChannel> channelFactory)
+            : base (channelFactory)
         {
             ArgumentNullException.ThrowIfNull(socket);
             ArgumentNullException.ThrowIfNull(protocolFactory);
@@ -28,12 +29,11 @@ public static class TcpHostAsync
 
         public string LocalAddress => _socket?.LocalEndPoint?.ToString() ?? string.Empty;
 
-        protected override async Task<IChannel> Accept(CancellationToken cancellationToken)
+        protected override async Task<IChannel?> Accept(CancellationToken cancellationToken)
         {
             var socket = await _socket.AcceptAsync(cancellationToken);
-            var channel = _channelFactory(new TcpChannel(socket, _protocolFactory()));
-
-            return channel;
+            if (socket is null) return null;
+            return new TcpChannel(socket, _protocolFactory());
         }
 
         protected override Task InternalDispose()
