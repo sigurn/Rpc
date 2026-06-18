@@ -40,16 +40,30 @@ using System;
 
 namespace MyCode
 {
+    public enum Permission
+    {
+        None,
+        Perm1,
+        Perm2,
+        Perm3,
+        Perm4
+    }
+
     [RemoteInterface()]
+    [RequirePermissions<Permission>(Permission.Perm1)] 
     public interface ITestService
     {
+        [RequireAuthenticated]
+        [RequirePermissions<Permission>(Permission.Perm1)]     
         string? Prop1 { get; set; }
         int Prop2 { get; }
         int Prop3 { set; }
         IList<Guid> Prop4 { get; init; }
-        bool? Prop5 { get; set; }
+        bool? Prop5 { get; [RequireAuthenticated] [RequirePermissions<Permission>(Permission.Perm2)] set; }
 
+        [RequireAuthenticated] 
         void Method1 ();
+        [RequirePermissions<Permission>(Permission.Perm3)]
         bool Method2 ();
         void Method3(string? text);
         string Method4(string text);
@@ -63,6 +77,8 @@ namespace MyCode
         Task Method12(bool flag, string text, CancellationToken cancellationToken);
         Task<string> Method13(string text1, string text2, CancellationToken cancellationToken);
 
+        [RequireAuthenticated]
+        [RequirePermissions<Permission>(Permission.Perm2, Permission.Perm3)]
         event EventHandler Event1;
         event EventHandler<string> Event2;
     }

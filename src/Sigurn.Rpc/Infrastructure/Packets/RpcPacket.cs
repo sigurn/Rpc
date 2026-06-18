@@ -54,7 +54,8 @@ abstract class RpcPacket
         TypeSerializers =
         [
             new RpcPacketSerializer(),
-            new EventArgsSerializer()
+            new EventArgsSerializer(),
+            new AccessDeniedExceptionSerializer()
         ]
     };
 

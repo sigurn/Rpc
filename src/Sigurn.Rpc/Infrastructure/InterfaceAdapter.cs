@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
 
@@ -191,6 +192,22 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     {
         EventTriggered?.Invoke(this, new EventDataArgs(eventId, args));
         return Task.CompletedTask;
+    }
+
+    protected static void CheckAuthenticated()
+    {
+        var session = Session.Current;
+        if (session is not null && session.IsAuthenticated) return;
+        throw new AccessDeniedException("Access is denied for unauthenticated clients");
+    }
+
+    protected static void CheckPermissions(ImmutableHashSet<Enum> permissions)
+    {
+        var session = Session.Current ?? 
+            throw new AccessDeniedException("Access is denied because session is undefined");
+
+        if (permissions.Any(x => !session.Permissions.Contains(x)))
+            throw new AccessDeniedException("Access is denied due to insufficient client permissions");
     }
 
     void ISessionsAware.AttachSession(ISession session)

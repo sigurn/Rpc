@@ -22,7 +22,7 @@ namespace Sigurn.Rpc.Generator
     readonly record struct TypePropertyInfo(string Name, IPropertySymbol Symbol, int Id);
     readonly record struct TypeMethodInfo(string Name, IMethodSymbol Symbol, int Id, bool oneWay, EquatableArray<ArgInfo> Args);
     readonly record struct TypeEventInfo(string Name, IEventSymbol Symbol, int Id, ITypeSymbol ReturnType, EquatableArray<ArgInfo> Args);
-    readonly record struct RemoteInterfaceTypeInfo(string TypeNamespace, string TypeName, string AdapterName, string ProxyName, EquatableArray<TypePropertyInfo> Properties, EquatableArray<TypeMethodInfo> Methods, EquatableArray<TypeEventInfo> Events);
+    readonly record struct RemoteInterfaceTypeInfo(string TypeNamespace, string TypeName, string AdapterName, string ProxyName, EquatableArray<TypePropertyInfo> Properties, EquatableArray<TypeMethodInfo> Methods, EquatableArray<TypeEventInfo> Events, bool IsAuthenticated, EquatableArray<string> Permissions);
 
     /// <summary>
     /// Rpc generator.
@@ -34,6 +34,8 @@ namespace Sigurn.Rpc.Generator
         private const string _taskName = "System.Threading.Tasks.Task";
         private const string _genericTaskName = "System.Threading.Tasks.Task<TResult>";
         private const string _cancellationTokenName = "System.Threading.CancellationToken";
+        private const string _requireAuthenticatedAttributeName = "Sigurn.Rpc.RequireAuthenticatedAttribute";
+        private const string _requirePermissionsAttributeName = "Sigurn.Rpc.RequirePermissionsAttribute";
         //private const string _serializationIgnoreAttributeName = "Sigurn.Serialize.SerializeIgnoreAttribute";
         //private const string _serializationOrderIdAttributeName = "Sigurn.Serialize.SerializeOrderAttribute";
 
@@ -110,17 +112,54 @@ namespace Sigurn.Rpc.Generator
                 ssb.Append("    public override async Task SetPropertyValueAsync(int propertyId, byte[]? value, CancellationToken cancellationToken)\n");
                 ssb.Append("    {\n");
 
+                if (riti.IsAuthenticated)
+                {
+                    gsb.Append("        CheckAuthenticated();\n\n");
+                    ssb.Append("        CheckAuthenticated();\n\n");
+                }
+
+                if (riti.Permissions.Count != 0)
+                {
+                    gsb.Append("        CheckPermissions([ ");
+                    gsb.Append(string.Join(", ", riti.Permissions));
+                    gsb.Append(" ]);\n\n");
+
+                    ssb.Append("        CheckPermissions([ ");
+                    ssb.Append(string.Join(", ", riti.Permissions));
+                    ssb.Append(" ]);\n\n");
+                }
+
                 bool firstGetter = true;
                 bool firstSetter = true;
                 foreach (var p in riti.Properties)
                 {
+                    var attr = p.Symbol.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == _requireAuthenticatedAttributeName);
+                    bool propIsAuthenticated = attr is not null && !riti.IsAuthenticated;
+
+                    var propPerm = GetPermissions(p.Symbol);
+    
                     if (p.Symbol.GetMethod is not null)
                     {
+                        var getAttr = p.Symbol.GetMethod.GetAttributes()
+                            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == _requireAuthenticatedAttributeName);
+                        bool getIsAuthenticated = (propIsAuthenticated | getAttr is not null) && !riti.IsAuthenticated;
+                        var getPerm = propPerm.Concat(GetPermissions(p.Symbol.GetMethod))
+                            .Distinct().Except(riti.Permissions).ToArray();
+
                         if (firstGetter)
                             gsb.Append($"        if (propertyId == {p.Id})\n");
                         else
                             gsb.Append($"        else if (propertyId == {p.Id})\n");
                         gsb.Append("        {\n");
+                        if (getIsAuthenticated)
+                            gsb.Append("            CheckAuthenticated();\n");
+                        if (getPerm is not null && getPerm.Length > 0)
+                        {
+                            gsb.Append($"            CheckPermissions([ ");
+                            gsb.Append(string.Join(", ", getPerm));
+                            gsb.Append($" ]);\n");
+                        }
                         gsb.Append($"            return await ToBytesAsync<{p.Symbol.Type}>(_instance.{p.Name}, cancellationToken)");
                         if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
                             gsb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
@@ -131,11 +170,25 @@ namespace Sigurn.Rpc.Generator
 
                     if (p.Symbol.SetMethod is not null)
                     {
+                        var setAttr = p.Symbol.SetMethod.GetAttributes()
+                            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == _requireAuthenticatedAttributeName);
+                        bool setIsAuthenticated = (propIsAuthenticated | setAttr is not null) && !riti.IsAuthenticated;
+                        var setPerm = propPerm.Concat(GetPermissions(p.Symbol.SetMethod))
+                            .Distinct().Except(riti.Permissions).ToArray();
+
                         if (firstSetter)
                             ssb.Append($"        if (propertyId == {p.Id})\n");
                         else
                             ssb.Append($"        else if (propertyId == {p.Id})\n");
                         ssb.Append("        {\n");
+                        if (setIsAuthenticated)
+                            ssb.Append("            CheckAuthenticated();\n");
+                        if (setPerm is not null && setPerm.Length > 0)
+                        {
+                            ssb.Append($"            CheckPermissions([ ");
+                            ssb.Append(string.Join(", ", setPerm));
+                            ssb.Append($" ]);\n");
+                        }
                         ssb.Append($"            _instance.{p.Name} = await FromBytesAsync<{p.Symbol.Type}>(value, cancellationToken)");
                         if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
                             ssb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
@@ -163,14 +216,41 @@ namespace Sigurn.Rpc.Generator
                 sb.Append("\n");
                 sb.Append("    public override async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(int methodId, IReadOnlyList<byte[]>? args, bool oneWay, CancellationToken cancellationToken)\n");
                 sb.Append("    {\n");
+
+                if (riti.IsAuthenticated)
+                    sb.Append("        CheckAuthenticated();\n\n");
+
+                if (riti.Permissions.Count != 0)
+                {
+                    sb.Append("        CheckPermissions([ ");
+                    sb.Append(string.Join(", ", riti.Permissions));
+                    sb.Append(" ]);\n\n");
+                }
+
                 bool firstMethod = true;
                 foreach (var m in riti.Methods)
                 {
+                    var attr = m.Symbol.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == _requireAuthenticatedAttributeName);
+                    bool methodIsAuthenticated = attr is not null && !riti.IsAuthenticated;
+                    var methodPerm = GetPermissions(m.Symbol)
+                        .Distinct().Except(riti.Permissions).ToArray();
+
                     if (firstMethod)
                         sb.Append($"        if (methodId == {m.Id})\n");
                     else
                         sb.Append($"        else if (methodId == {m.Id})\n");
                     sb.Append("        {\n");
+
+                    if (methodIsAuthenticated)
+                        sb.Append("            CheckAuthenticated();\n\n");
+                    if (methodPerm is not null && methodPerm.Length > 0)
+                    {
+                        sb.Append($"            CheckPermissions([ ");
+                        sb.Append(string.Join(", ", methodPerm));
+                        sb.Append($" ]);\n");
+                    }
+
                     var count = m.Args.Where(x => x.Symbol.Type.ToString() != _cancellationTokenName).Count();
                     if (count != 0)
                     {
@@ -268,9 +348,32 @@ namespace Sigurn.Rpc.Generator
                 desb.Append("        try\n");
                 desb.Append("        {\n");
 
+                if (riti.IsAuthenticated)
+                {
+                    aesb.Append("            CheckAuthenticated();\n\n");
+                    desb.Append("            CheckAuthenticated();\n\n");
+                }
+
+                if (riti.Permissions.Count != 0)
+                {
+                    aesb.Append("            CheckPermissions([ ");
+                    aesb.Append(string.Join(", ", riti.Permissions));
+                    aesb.Append(" ]);\n\n");
+
+                    desb.Append("            CheckPermissions([ ");
+                    desb.Append(string.Join(", ", riti.Permissions));
+                    desb.Append(" ]);\n\n");
+                }
+
                 bool firstEvent = true;
                 foreach (var e in riti.Events)
                 {
+                    var attr = e.Symbol.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == _requireAuthenticatedAttributeName);
+                    bool eventIsAuthenticated = attr is not null && !riti.IsAuthenticated;
+                    var eventPerm = GetPermissions(e.Symbol)
+                        .Distinct().Except(riti.Permissions).ToArray();
+
                     var args = string.Join(", ", e.Args.Select(x => $"{x.Symbol.Type} {x.Name}"));
 
                     ehsb.Append("\n");
@@ -297,8 +400,29 @@ namespace Sigurn.Rpc.Generator
                         aesb.Append($"            else if (eventId == {e.Id})\n");
                         desb.Append($"            else if (eventId == {e.Id})\n");
                     }
+                    aesb.Append("            {\n");
+                    desb.Append("            {\n");
+                    if (eventIsAuthenticated)
+                    {
+                        aesb.Append("                CheckAuthenticated();\n");
+                        desb.Append("                CheckAuthenticated();\n");
+                    }
+                    if (eventPerm is not null && eventPerm.Length > 0)
+                    {
+                        aesb.Append($"                CheckPermissions([ ");
+                        aesb.Append(string.Join(", ", eventPerm));
+                        aesb.Append($" ]);\n");
+
+                        desb.Append($"                CheckPermissions([ ");
+                        desb.Append(string.Join(", ", eventPerm));
+                        desb.Append($" ]);\n");
+                    }
+
                     aesb.Append($"                _instance.{e.Name} += On{e.Name};\n");
                     desb.Append($"                _instance.{e.Name} -= On{e.Name};\n");
+
+                    aesb.Append("            }\n");
+                    desb.Append("            }\n");
                     firstEvent = false;
                 }
                 aesb.Append("\n");
@@ -565,6 +689,22 @@ namespace Sigurn.Rpc.Generator
             var adapterName = $"{typeName}_Adapter";
             var proxyName = $"{typeName}_Proxy";
 
+            var authenticatedAttr = GetAttribute(syntaxNode, semanticModel, _requireAuthenticatedAttributeName);
+            var permissionAttrs = GetAttributes(syntaxNode, semanticModel, _requirePermissionsAttributeName).ToArray();
+            var format = new SymbolDisplayFormat(
+                typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+                genericsOptions: SymbolDisplayGenericsOptions.None);
+            EquatableArray<string> interfacePermissions = new ([.. permissionAttrs
+                .SelectMany(x => x.ArgumentList is not null ? x.ArgumentList.Arguments : [])
+                .Select(x =>
+                {
+                    var symbol = semanticModel.GetSymbolInfo(x.Expression).Symbol!;
+                    if (symbol is IFieldSymbol fs)
+                        return $"{fs.ContainingType.ToDisplayString(format)}.{fs.Name}";
+                    return symbol.ToDisplayString(format);
+                })
+                .Distinct()]);
+
             // var generateAttr = GetAttribute(syntaxNode, semanticModel, _generateSerializerAttributeName);
             // if (generateAttr != null && generateAttr.ArgumentList?.Arguments.Count != 0)
             // {
@@ -576,7 +716,6 @@ namespace Sigurn.Rpc.Generator
             //             useGlobally = b;
             //     }
             // } 
-
 
             var publicProps = syntaxNode.Members.OfType<PropertyDeclarationSyntax>()
                 .Where(x =>
@@ -655,7 +794,7 @@ namespace Sigurn.Rpc.Generator
                     return new TypeEventInfo(name, symbol, orderId, retType, args);
                 }).ToArray());
 
-            return new RemoteInterfaceTypeInfo(typeNamespace, typeName, adapterName, proxyName, props, methods, events);
+            return new RemoteInterfaceTypeInfo(typeNamespace, typeName, adapterName, proxyName, props, methods, events, authenticatedAttr is not null, interfacePermissions);
         }
 
         private bool HasAttribute(MemberDeclarationSyntax memberDeclarartion, SemanticModel model, string fullAttrName)
@@ -700,6 +839,31 @@ namespace Sigurn.Rpc.Generator
             }
 
             return null;
+        }
+
+        private IEnumerable<AttributeSyntax> GetAttributes(MemberDeclarationSyntax memberDeclarartion, SemanticModel model, string fullAttrName)
+        {
+            foreach (AttributeListSyntax attributeListSyntax in memberDeclarartion.AttributeLists)
+            {
+                foreach (AttributeSyntax attributeSyntax in attributeListSyntax.Attributes)
+                {
+                    var si = model.GetSymbolInfo(attributeSyntax);
+                    var attributeSymbol = si.Symbol;
+                    if (attributeSymbol == null)
+                        continue;
+
+                    var format = new SymbolDisplayFormat(
+                        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+                        genericsOptions: SymbolDisplayGenericsOptions.None);
+                    INamedTypeSymbol attributeContainingTypeSymbol = attributeSymbol.ContainingType;
+                    string fullName = attributeContainingTypeSymbol.IsGenericType ?
+                        attributeContainingTypeSymbol.ConstructedFrom.ToDisplayString(format) : 
+                        attributeContainingTypeSymbol.ToDisplayString();
+
+                    if (fullName == fullAttrName)
+                        yield return attributeSyntax;
+                }
+            }
         }
 
         private static string GetFullTypeName(TypeDeclarationSyntax typeDeclaration)
@@ -772,6 +936,26 @@ namespace Sigurn.Rpc.Generator
         {
             var cancellationTokenType = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
             return SymbolEqualityComparer.Default.Equals(parameter.Type, cancellationTokenType);
+        }
+
+        private static string[] GetPermissions(ISymbol symbol)
+        {
+            var attrs = symbol.GetAttributes()
+                .Where(x => x?.AttributeClass?.IsGenericType ?? false)
+                .Where(x => $"{x.AttributeClass?.ContainingNamespace.ToDisplayString()}.{x.AttributeClass?.Name}" == _requirePermissionsAttributeName)
+                .ToArray();
+            
+            return [.. attrs.SelectMany(x => {
+                return x.ConstructorArguments.First().Values
+                    .Select(v =>
+                    {
+                        var field = ((INamedTypeSymbol)v.Type!).GetMembers()
+                            .OfType<IFieldSymbol>()
+                            .First(f => Equals(f.ConstantValue, v.Value));
+                        return $"{field.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}.{field.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}";
+                    });
+            })
+            .Distinct()];
         }
     }
 }

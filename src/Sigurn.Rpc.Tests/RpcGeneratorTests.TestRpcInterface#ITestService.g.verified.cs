@@ -28,8 +28,11 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
 
     public override async Task<byte[]?> GetPropertyValueAsync(int propertyId, CancellationToken cancellationToken)
     {
+        CheckPermissions([ MyCode.Permission.Perm1 ]);
+
         if (propertyId == 0)
         {
+            CheckAuthenticated();
             return await ToBytesAsync<string?>(_instance.Prop1, cancellationToken);
         }
         else if (propertyId == 1)
@@ -50,8 +53,11 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
 
     public override async Task SetPropertyValueAsync(int propertyId, byte[]? value, CancellationToken cancellationToken)
     {
+        CheckPermissions([ MyCode.Permission.Perm1 ]);
+
         if (propertyId == 0)
         {
+            CheckAuthenticated();
             _instance.Prop1 = await FromBytesAsync<string?>(value, cancellationToken);
             return;
         }
@@ -67,6 +73,8 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
         }
         else if (propertyId == 4)
         {
+            CheckAuthenticated();
+            CheckPermissions([ MyCode.Permission.Perm2 ]);
             _instance.Prop5 = await FromBytesAsync<bool?>(value, cancellationToken);
             return;
         }
@@ -76,12 +84,17 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
 
     public override async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(int methodId, IReadOnlyList<byte[]>? args, bool oneWay, CancellationToken cancellationToken)
     {
+        CheckPermissions([ MyCode.Permission.Perm1 ]);
+
         if (methodId == 0)
         {
+            CheckAuthenticated();
+
             _instance.Method1();
         }
         else if (methodId == 1)
         {
+            CheckPermissions([ MyCode.Permission.Perm3 ]);
             bool @__res = _instance.Method2();
             return (Result: await ToBytesAsync<bool>(@__res, cancellationToken), null);
         }
@@ -175,10 +188,18 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
     {
         try
         {
+            CheckPermissions([ MyCode.Permission.Perm1 ]);
+
             if (eventId == 0)
+            {
+                CheckAuthenticated();
+                CheckPermissions([ MyCode.Permission.Perm2, MyCode.Permission.Perm3 ]);
                 _instance.Event1 += OnEvent1;
+            }
             else if (eventId == 1)
+            {
                 _instance.Event2 += OnEvent2;
+            }
 
             return Task.CompletedTask;
         }
@@ -192,10 +213,18 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
     {
         try
         {
+            CheckPermissions([ MyCode.Permission.Perm1 ]);
+
             if (eventId == 0)
+            {
+                CheckAuthenticated();
+                CheckPermissions([ MyCode.Permission.Perm2, MyCode.Permission.Perm3 ]);
                 _instance.Event1 -= OnEvent1;
+            }
             else if (eventId == 1)
+            {
                 _instance.Event2 -= OnEvent2;
+            }
 
             return Task.CompletedTask;
         }
