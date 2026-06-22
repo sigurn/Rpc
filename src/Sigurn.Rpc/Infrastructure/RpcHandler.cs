@@ -337,10 +337,10 @@ class RpcHandler : IDisposable
             try
             {
                 if (_channel.State != ChannelState.Opened &&
-                    !await WaitForChannelOpenAsync(_channel, cancellationToken)) return;
+                    !await WaitForChannelOpenAsync(_channel, cancellationToken).ConfigureAwait(false)) return;
 
-                var packet = await _channel.ReceiveAsync(cancellationToken);
-                var request = await RpcPacket.FromPacketAsync(packet, _context, cancellationToken);
+                var packet = await _channel.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+                var request = await RpcPacket.FromPacketAsync(packet, _context, cancellationToken).ConfigureAwait(false);
                 if (request is null) continue;
 
                 if (_requests.TryGetValue(request.RequestId, out var tcs))
@@ -444,7 +444,7 @@ class RpcHandler : IDisposable
         {
             channel.Opened += handler;
             if (channel.State == ChannelState.Opened) tcs.TrySetResult(true);
-            return await tcs.Task;
+            return await tcs.Task.ConfigureAwait(false);
         }
         finally
         {

@@ -325,6 +325,87 @@ public class RpcHandlerTests
     }
 
     [Fact(Timeout = 15000)]
+    public async Task PacketHandlingLoopDoesNotPostToUiSynchronizationContextTest()
+    {
+        // Reproduces the bug where StartPacketHandling captures the UI SynchronizationContext
+        // (Avalonia Dispatcher) because ConfigureAwait(false) is missing on the inner awaits.
+        // Without the fix every packet receive cycle is posted to the captured context,
+        // stalling the UI thread.
+        var trackingContext = new TrackingSynchronizationContext();
+
+        IChannel? serverChannel = null;
+        using var host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+
+        using var connectEvent = new ManualResetEvent(false);
+        host.Connected += (s, a) =>
+        {
+            serverChannel = a.Channel;
+            connectEvent.Set();
+        };
+
+        host.Open();
+
+        using var channel = new TcpChannel(host.EndPoint);
+
+        // Install the tracking context before constructing RpcHandler so that
+        // StartPacketHandling captures it via the first await.
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(trackingContext);
+        RpcHandler handler;
+        try
+        {
+            handler = new RpcHandler(channel);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        using (handler)
+        using (var cts = new CancellationTokenSource())
+        {
+            await channel.OpenAsync(cts.Token);
+            Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
+            Assert.NotNull(serverChannel);
+
+            // Exchange several packets to exercise the receive loop
+            for (int i = 0; i < 3; i++)
+            {
+                var serverTask = serverChannel.ReceiveAsync(cts.Token)
+                    .ContinueWith(t => serverChannel.SendAsync(t.Result, cts.Token));
+
+                var packet = new SuccessPacket();
+                await handler.RequestAsync(packet, cts.Token);
+                await serverTask;
+            }
+
+            // With fix: all awaits in StartPacketHandling use ConfigureAwait(false) so
+            // continuations never run on the captured SynchronizationContext → PostCount == 0.
+            // Without fix: WaitForChannelOpenAsync and ReceiveAsync continuations are
+            // scheduled back onto the captured context → PostCount > 0.
+            Assert.Equal(0, trackingContext.PostCount);
+        }
+    }
+
+    private sealed class TrackingSynchronizationContext : SynchronizationContext
+    {
+        private int _postCount;
+
+        public int PostCount => Volatile.Read(ref _postCount);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            ThreadPool.QueueUserWorkItem(_ => d(state), null);
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+
+        public override SynchronizationContext CreateCopy() => this;
+    }
+
+    [Fact(Timeout = 15000)]
     public async Task ClientRequestCancelationCancelsRequestOnServerTest()
     {
         RpcHandler? serverHandler = null;
