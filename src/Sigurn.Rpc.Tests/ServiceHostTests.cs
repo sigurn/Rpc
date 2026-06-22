@@ -768,6 +768,52 @@ public class ServiceHostTests
         Assert.Equal("System.Exception", ep.Type);
     }
 
+    private sealed class DisposableNotification : ITestNotification, IDisposable
+    {
+        private readonly ManualResetEvent _disposedEvent;
+        public DisposableNotification(ManualResetEvent disposedEvent) => _disposedEvent = disposedEvent;
+        public void OnNotification(string data) { }
+        public void Dispose() => _disposedEvent.Set();
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task ReturnedInterfaceInstanceIsDisposedOnClientRelease()
+    {
+        using ManualResetEvent disposedEvent = new(false);
+
+        var svc = new TestService(new List<string>());
+        svc.SetSubServiceFactory(() => new DisposableNotification(disposedEvent));
+
+        var tcpHost = new TcpHost();
+        tcpHost.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.None, () => svc);
+        sh.Start();
+
+        using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        using RpcClient client = new RpcClient(async ct =>
+        {
+            var ch = new TcpChannel(tcpHost.EndPoint);
+            await ch.OpenAsync(ct);
+            return ch;
+        });
+
+        await client.OpenAsync(cts.Token);
+
+        var proxy = await client.GetService<ITestService>(cts.Token);
+        var sub = proxy.GetSubService();
+
+        Assert.False(disposedEvent.WaitOne(0), "Dispose should not be called before client releases the sub-service");
+
+        ((IDisposable)sub).Dispose();
+
+        Assert.True(disposedEvent.WaitOne(TimeSpan.FromSeconds(5)), "Server-side IDisposable was not disposed after client released the sub-service proxy");
+
+        await client.CloseAsync(cts.Token);
+        tcpHost.Close();
+    }
+
     private static async Task<byte[]> ToBytes<T>(T value, SerializationContext context, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();

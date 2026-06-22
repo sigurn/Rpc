@@ -72,6 +72,8 @@ public class RpcEventContextTests
             throw new NotImplementedException();
         }
 
+        public ITestNotification GetSubService() => throw new NotImplementedException();
+
         public void RaiseTestEventNoSession()
         {
             TestEvent?.Invoke(this, EventArgs.Empty);

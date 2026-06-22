@@ -85,9 +85,9 @@ public interface ITestService
     int Property1 { get; set; }
 
     event EventHandler TestEvent;
-   Task MethodThrowAsync(CancellationToken cancellationToken);
-
- }
+    Task MethodThrowAsync(CancellationToken cancellationToken);
+    ITestNotification GetSubService();
+}
 
 class TestServiceAdapter : InterfaceAdapter
 {
@@ -190,6 +190,11 @@ class TestServiceAdapter : InterfaceAdapter
 
             await _instance.MethodThrowAsync(cancellationToken);
             return (Result: null, Args: null);
+        }
+        else if (methodId == 11)
+        {
+            var result = _instance.GetSubService();
+            return (Result: await ToBytesAsync<ITestNotification>(result, cancellationToken), Args: null);
         }
 
         return (Result: null, Args: null);
@@ -353,7 +358,13 @@ class TestServiceProxy : InterfaceProxy, ITestService
     {
         await InvokeMethodAsync(10, [], false, cancellationToken);
     }
-    
+
+    ITestNotification ITestService.GetSubService()
+    {
+        var (res, _) = InvokeMethod(11, [], false);
+        return FromBytes<ITestNotification>(res) ?? throw new InvalidOperationException("Server returned null for GetSubService");
+    }
+
     int ITestService.Property1
     {
         get => GetProperty<int>(1);
@@ -481,6 +492,15 @@ class TestService : ITestService, IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromException(new NotImplementedException());
+    }
+
+    private Func<ITestNotification>? _subServiceFactory;
+    public void SetSubServiceFactory(Func<ITestNotification> factory) => _subServiceFactory = factory;
+
+    ITestNotification ITestService.GetSubService()
+    {
+        if (_subServiceFactory is null) throw new InvalidOperationException("SubService factory not configured");
+        return _subServiceFactory();
     }
 
     private int _property1;

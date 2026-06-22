@@ -98,6 +98,8 @@ public class RpcSessionTests
         {
             throw new NotImplementedException();
         }
+
+        public ITestNotification GetSubService() => throw new NotImplementedException();
     }
 
     public Task<IChannel> EmptyFactory(CancellationToken cancellationToken)

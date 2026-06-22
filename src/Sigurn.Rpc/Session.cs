@@ -368,6 +368,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                             _instances.Remove(instance);
 
                         (x as IDisposable)?.Dispose();
+                        (instance as IDisposable)?.Dispose();
                     }
                 );
                 _instances.Add(instance, refCounter);
