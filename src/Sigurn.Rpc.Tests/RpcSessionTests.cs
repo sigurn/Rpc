@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Net;
 using Moq;
+using Sigurn.Rpc.Infrastructure.Packets;
 
 namespace Sigurn.Rpc.Tests;
 
@@ -442,5 +443,99 @@ public class RpcSessionTests
         host.Close();
 
         service.Verify();
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task EventDataPacketIsDroppedSilentlyBySessionTest()
+    {
+        // Reproduces the bug: server sends EventDataPacket fire-and-forget; the
+        // client Session.OnRequest hits the "Unknown packet" throw and returns an
+        // ExceptionPacket, which the server echoes back, creating a 118+ exc/sec loop.
+        // After the fix Session.OnRequest returns null for EventDataPacket → no response.
+
+        using var host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+
+        IChannel? serverRawChannel = null;
+        using var connectEvent = new ManualResetEvent(false);
+        host.Connected += (s, a) =>
+        {
+            serverRawChannel = a.Channel;
+            connectEvent.Set();
+        };
+
+        host.Open();
+
+        using var cts = new CancellationTokenSource();
+        using var clientChannel = new TcpChannel(host.EndPoint);
+        await clientChannel.OpenAsync(cts.Token);
+
+        Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.NotNull(serverRawChannel);
+
+        using var clientSession = new Session(clientChannel);
+
+        // Server sends EventDataPacket as fire-and-forget (no TCS in _requests)
+        var eventPacket = new EventDataPacket(Guid.NewGuid(), 1, []);
+        var rawPacket = IPacket.Create(await eventPacket.ToBytesAsync(RpcPacket.DefaultSerializationContext, cts.Token));
+        await serverRawChannel.SendAsync(rawPacket, cts.Token);
+
+        // Before fix: Session.OnRequest throws "Unknown packet" → catch → ExceptionPacket sent back
+        // After fix: Session.OnRequest returns null → ContinueWith skips send → nothing arrives
+        using var receiveTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        try
+        {
+            var rawResponse = await serverRawChannel.ReceiveAsync(receiveTimeout.Token);
+            var rpcResponse = await RpcPacket.FromPacketAsync(rawResponse, RpcPacket.DefaultSerializationContext, cts.Token);
+            Assert.IsNotType<ExceptionPacket>(rpcResponse);
+        }
+        catch (OperationCanceledException) { /* timeout = no response = correct */ }
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task StaleExceptionPacketIsDroppedSilentlyBySessionTest()
+    {
+        // Reproduces the second half of the ping-pong: the server receives an
+        // ExceptionPacket that matches no pending TCS (stale/unsolicited) and its own
+        // Session.OnRequest also throws "Unknown packet", echoing another ExceptionPacket
+        // back. After the fix Session.OnRequest returns null for ExceptionPacket.
+
+        using var host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+
+        IChannel? serverRawChannel = null;
+        using var connectEvent = new ManualResetEvent(false);
+        host.Connected += (s, a) =>
+        {
+            serverRawChannel = a.Channel;
+            connectEvent.Set();
+        };
+
+        host.Open();
+
+        using var cts = new CancellationTokenSource();
+        using var clientChannel = new TcpChannel(host.EndPoint);
+        await clientChannel.OpenAsync(cts.Token);
+
+        Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.NotNull(serverRawChannel);
+
+        using var clientSession = new Session(clientChannel);
+
+        // Server sends an ExceptionPacket whose RequestId doesn't match any pending TCS
+        var staleException = new ExceptionPacket(new SuccessPacket(), new Exception("stale"));
+        var rawPacket = IPacket.Create(await staleException.ToBytesAsync(RpcPacket.DefaultSerializationContext, cts.Token));
+        await serverRawChannel.SendAsync(rawPacket, cts.Token);
+
+        // Before fix: Session.OnRequest throws "Unknown packet" → another ExceptionPacket returned
+        // After fix: Session.OnRequest returns null → no response sent
+        using var receiveTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        try
+        {
+            var rawResponse = await serverRawChannel.ReceiveAsync(receiveTimeout.Token);
+            var rpcResponse = await RpcPacket.FromPacketAsync(rawResponse, RpcPacket.DefaultSerializationContext, cts.Token);
+            Assert.IsNotType<ExceptionPacket>(rpcResponse);
+        }
+        catch (OperationCanceledException) { /* timeout = no response = correct */ }
     }
 }

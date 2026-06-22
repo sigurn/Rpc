@@ -541,9 +541,21 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 {
                     var instance = GetAdapter(ufep.InstanceId) ??
                         throw new Exception("Unknown instance");
-                        
+
                     await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken);
                     return new SuccessPacket(ufep);
+                }
+                else if (request is EventDataPacket)
+                {
+                    // Fire-and-forget from the remote side; already handled by
+                    // _packetHandlers (ServiceInstance). No response expected.
+                    return null;
+                }
+                else if (request is ExceptionPacket)
+                {
+                    // Stale error response not matched by any pending TCS.
+                    // Drop silently to break any ExceptionPacket ping-pong loop.
+                    return null;
                 }
 
                 throw new Exception("Unknown packet");
