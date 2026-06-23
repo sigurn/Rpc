@@ -118,6 +118,7 @@ class RpcHandler : IDisposable
 
     public async Task<RpcPacket> RequestAsync(RpcPacket packet, CancellationToken cancellationToken)
     {
+        var timeout = Sigurn.Rpc.RpcContext.Current?.Timeout ?? AnswerTimeout;
         using var taskCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         var completionSource = new TaskCompletionSource<RpcPacket>();
@@ -138,7 +139,7 @@ class RpcHandler : IDisposable
                 if (_requests.TryRemove(packet.RequestId, out var rcs))
                     rcs.TrySetCanceled();
             });
-            return await completionSource.Task.WaitAsync(AnswerTimeout);
+            return await completionSource.Task.WaitAsync(timeout);
         }
         finally
         {
@@ -149,6 +150,7 @@ class RpcHandler : IDisposable
 
     public async Task<T> RequestAsync<T>(RpcPacket packet, CancellationToken cancellationToken) where T : RpcPacket
     {
+        var timeout = Sigurn.Rpc.RpcContext.Current?.Timeout ?? AnswerTimeout;
         using var taskCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         var completionSource = new TaskCompletionSource<RpcPacket>();
@@ -169,7 +171,7 @@ class RpcHandler : IDisposable
                     rcs.TrySetCanceled();
             });
 
-            var answer = await completionSource.Task.WaitAsync(AnswerTimeout);
+            var answer = await completionSource.Task.WaitAsync(timeout);
             if (answer is T a)
                 return a;
             else if (answer is ExceptionPacket exp)

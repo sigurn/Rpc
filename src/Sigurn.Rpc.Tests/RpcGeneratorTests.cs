@@ -72,6 +72,7 @@ namespace MyCode
         bool Method7(ref int n, out string[] outText);
         string? Method8();
         bool? Method9();
+        [NoRpcTimeout]
         Task Method10();
         Task Method11(CancellationToken cancellationToken);
         Task Method12(bool flag, string text, CancellationToken cancellationToken);

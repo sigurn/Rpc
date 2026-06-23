@@ -375,6 +375,7 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
 
     async System.Threading.Tasks.Task MyCode.ITestService.Method10()
     {
+        using var @_noTimeout = new Sigurn.Rpc.RpcContext { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
          await InvokeMethodAsync(9, [], false, System.Threading.CancellationToken.None);
     }
 

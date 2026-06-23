@@ -48,6 +48,16 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
     public ChannelState State => _channel.State;
 
     /// <summary>
+    /// Gets or sets the timeout applied to each RPC call. Defaults to 15 seconds.
+    /// Use <see cref="Timeout.InfiniteTimeSpan"/> to disable the timeout.
+    /// </summary>
+    public TimeSpan AnswerTimeout
+    {
+        get => _session.Rpc.AnswerTimeout;
+        set => _session.Rpc.AnswerTimeout = value;
+    }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the client should automatically reconnect after a fault.
     /// </summary>
     public bool AutoReopen

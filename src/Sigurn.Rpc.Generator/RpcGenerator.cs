@@ -36,6 +36,7 @@ namespace Sigurn.Rpc.Generator
         private const string _cancellationTokenName = "System.Threading.CancellationToken";
         private const string _requireAuthenticatedAttributeName = "Sigurn.Rpc.RequireAuthenticatedAttribute";
         private const string _requirePermissionsAttributeName = "Sigurn.Rpc.RequirePermissionsAttribute";
+        private const string _noRpcTimeoutAttributeName = "Sigurn.Rpc.NoRpcTimeoutAttribute";
         //private const string _serializationIgnoreAttributeName = "Sigurn.Serialize.SerializeIgnoreAttribute";
         //private const string _serializationOrderIdAttributeName = "Sigurn.Serialize.SerializeOrderAttribute";
 
@@ -521,6 +522,10 @@ namespace Sigurn.Rpc.Generator
                     })));
                     sb.Append(")\n");
                     sb.Append("    {\n");
+                    bool noTimeout = m.Symbol.GetAttributes()
+                        .Any(a => a.AttributeClass?.ToDisplayString() == _noRpcTimeoutAttributeName);
+                    if (noTimeout)
+                        sb.Append("        using var @_noTimeout = new Sigurn.Rpc.RpcContext { Timeout = System.Threading.Timeout.InfiniteTimeSpan };\n");
                     bool args = false;
                     bool outArgs = false;
                     string? cancellationToken = m.Args
