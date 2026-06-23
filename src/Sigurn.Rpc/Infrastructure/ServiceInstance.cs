@@ -21,7 +21,7 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _handler.ReleaseServiceInstanceAsync(InstanceId, CancellationToken.None);
+        await _handler.ReleaseServiceInstanceAsync(InstanceId, CancellationToken.None).ConfigureAwait(false);
         _removeHandler.Dispose();
     }
 
@@ -31,27 +31,27 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
 
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(int methodId, IReadOnlyList<byte[]>? args, bool oneWay, CancellationToken cancellationToken)
     {
-        return await _handler.InvokeMethodAsync(InstanceId, methodId, args ?? [], oneWay, cancellationToken);
+        return await _handler.InvokeMethodAsync(InstanceId, methodId, args ?? [], oneWay, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<byte[]?> GetPropertyValueAsync(int propertyId, CancellationToken cancellationToken)
     {
-        return await _handler.GetPropertyAsync(InstanceId, propertyId, cancellationToken);
+        return await _handler.GetPropertyAsync(InstanceId, propertyId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task SetPropertyValueAsync(int propertyId, byte[]? value, CancellationToken cancellationToken)
     {
-        await _handler.SetPropertyAsync(InstanceId, propertyId, value, cancellationToken);
+        await _handler.SetPropertyAsync(InstanceId, propertyId, value, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task AttachEventHandlerAsync(int eventId, CancellationToken cancellationToken)
     {
-        await _handler.AttachEventAsync(InstanceId, eventId, cancellationToken);
+        await _handler.AttachEventAsync(InstanceId, eventId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task DetachEventHandlerAsync(int eventId, CancellationToken cancellationToken)
     {
-        await _handler.DetachEventAsync(InstanceId, eventId, cancellationToken);
+        await _handler.DetachEventAsync(InstanceId, eventId, cancellationToken).ConfigureAwait(false);
     }
 
     public event EventHandler<EventDataArgs>? EventTriggered;

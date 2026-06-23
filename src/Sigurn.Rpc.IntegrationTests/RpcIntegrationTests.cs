@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace Sigurn.Rpc.IntegrationTests;
 
 [RemoteInterface]
@@ -67,6 +69,21 @@ public sealed class TestService : ITestService
     }
 }
 
+/// <summary>
+/// Minimal single-threaded SynchronizationContext that captures posted continuations into a
+/// queue, mimicking a UI message loop. While the owning thread blocks on a sync-over-async call,
+/// nothing drains the queue, so a captured continuation can never run — the deadlock the fix
+/// must avoid.
+/// </summary>
+internal sealed class SingleThreadSynchronizationContext : SynchronizationContext
+{
+    private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+    public override void Post(SendOrPostCallback d, object? state) => _queue.Add((d, state));
+
+    public void Complete() => _queue.CompleteAdding();
+}
+
 public class RpcIntegrationTests
 {
     private static async Task<(RpcClient client, ITestService service)> CreateClientAsync(TcpHost tcpHost)
@@ -105,6 +122,62 @@ public class RpcIntegrationTests
         testService.Method1();
         Assert.True(eventTriggered.WaitOne(TimeSpan.FromSeconds(5)));
         Assert.Equal("string1string2", await testService.Method4("string1", "string2", CancellationToken.None));
+    }
+
+    /// <summary>
+    /// Reproduces the deadlock that occurs when a proxy method or proxy/client disposal is
+    /// invoked synchronously (sync-over-async) from a thread that carries a SynchronizationContext
+    /// (e.g. an Avalonia/WPF UI thread). Without ConfigureAwait(false) inside the library the
+    /// awaited continuations are posted back to that single thread, which is blocked waiting for
+    /// the very task it must complete — a classic deadlock. With ConfigureAwait(false) the
+    /// continuations run on the thread pool and the blocking calls return.
+    /// </summary>
+    [Fact]
+    public async Task SyncOverAsync_OnSynchronizationContext_DoesNotDeadlock()
+    {
+        using var tcpHost = new TcpHost();
+        var serviceHost = new ServiceHost(tcpHost);
+        serviceHost.RegisterSerive<ITestService>(ShareWithin.None, () => new TestService());
+        serviceHost.Start();
+
+        var (client, testService) = await CreateClientAsync(tcpHost);
+
+        using var done = new ManualResetEventSlim(false);
+        Exception? error = null;
+
+        var thread = new Thread(() =>
+        {
+            var syncContext = new SingleThreadSynchronizationContext();
+            SynchronizationContext.SetSynchronizationContext(syncContext);
+            try
+            {
+                // Sync-over-async on a UI-like thread: blocking on an awaited proxy call.
+                var result = testService.Method4("string1", "string2", CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                Assert.Equal("string1string2", result);
+
+                // The original repro: disposing the proxy and the client from the UI thread.
+                // Proxy.Dispose() releases the server instance, whose ServiceInstance.Dispose()
+                // does DisposeAsync().AsTask().Wait().
+                (testService as IDisposable)?.Dispose();
+                client.Dispose();
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+            finally
+            {
+                syncContext.Complete();
+                done.Set();
+            }
+        })
+        { IsBackground = true };
+        thread.Start();
+
+        Assert.True(done.Wait(TimeSpan.FromSeconds(15)),
+            "Sync-over-async on a SynchronizationContext deadlocked — library awaits must use ConfigureAwait(false).");
+        Assert.Null(error);
     }
 
     [Fact]

@@ -51,13 +51,13 @@ class ErrorPacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _error = await Serializer.FromStreamAsync<RpcError>(stream, context, cancellationToken);
-        _stackTrace = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken);
+        _error = await Serializer.FromStreamAsync<RpcError>(stream, context, cancellationToken).ConfigureAwait(false);
+        _stackTrace = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _error, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _stackTrace, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _error, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _stackTrace, context, cancellationToken).ConfigureAwait(false);
     }
 }

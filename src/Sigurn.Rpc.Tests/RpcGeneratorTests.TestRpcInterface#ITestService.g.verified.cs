@@ -33,19 +33,19 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
         if (propertyId == 0)
         {
             CheckAuthenticated();
-            return await ToBytesAsync<string?>(_instance.Prop1, cancellationToken);
+            return await ToBytesAsync<string?>(_instance.Prop1, cancellationToken).ConfigureAwait(false);
         }
         else if (propertyId == 1)
         {
-            return await ToBytesAsync<int>(_instance.Prop2, cancellationToken);
+            return await ToBytesAsync<int>(_instance.Prop2, cancellationToken).ConfigureAwait(false);
         }
         else if (propertyId == 3)
         {
-            return await ToBytesAsync<System.Collections.Generic.IList<System.Guid>>(_instance.Prop4, cancellationToken) ?? throw new InvalidOperationException("Property value cannot be null");
+            return await ToBytesAsync<System.Collections.Generic.IList<System.Guid>>(_instance.Prop4, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("Property value cannot be null");
         }
         else if (propertyId == 4)
         {
-            return await ToBytesAsync<bool?>(_instance.Prop5, cancellationToken);
+            return await ToBytesAsync<bool?>(_instance.Prop5, cancellationToken).ConfigureAwait(false);
         }
 
         throw new Exception("Unknown property");
@@ -58,24 +58,24 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
         if (propertyId == 0)
         {
             CheckAuthenticated();
-            _instance.Prop1 = await FromBytesAsync<string?>(value, cancellationToken);
+            _instance.Prop1 = await FromBytesAsync<string?>(value, cancellationToken).ConfigureAwait(false);
             return;
         }
         else if (propertyId == 2)
         {
-            _instance.Prop3 = await FromBytesAsync<int>(value, cancellationToken);
+            _instance.Prop3 = await FromBytesAsync<int>(value, cancellationToken).ConfigureAwait(false);
             return;
         }
         else if (propertyId == 3)
         {
-            _instance.Prop4 = await FromBytesAsync<System.Collections.Generic.IList<System.Guid>>(value, cancellationToken) ?? throw new InvalidOperationException("Property value cannot be null");
+            _instance.Prop4 = await FromBytesAsync<System.Collections.Generic.IList<System.Guid>>(value, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("Property value cannot be null");
             return;
         }
         else if (propertyId == 4)
         {
             CheckAuthenticated();
             CheckPermissions([ MyCode.Permission.Perm2 ]);
-            _instance.Prop5 = await FromBytesAsync<bool?>(value, cancellationToken);
+            _instance.Prop5 = await FromBytesAsync<bool?>(value, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -96,14 +96,14 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
         {
             CheckPermissions([ MyCode.Permission.Perm3 ]);
             bool @__res = _instance.Method2();
-            return (Result: await ToBytesAsync<bool>(@__res, cancellationToken), null);
+            return (Result: await ToBytesAsync<bool>(@__res, cancellationToken).ConfigureAwait(false), null);
         }
         else if (methodId == 2)
         {
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string?>(args[0], cancellationToken);
+            var @text = await FromBytesAsync<string?>(args[0], cancellationToken).ConfigureAwait(false);
             _instance.Method3(@text);
         }
         else if (methodId == 3)
@@ -111,74 +111,74 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
+            var @text = await FromBytesAsync<string>(args[0], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("text");
             string @__res = _instance.Method4(@text);
-            return (Result: await ToBytesAsync<string>(@__res, cancellationToken), null);
+            return (Result: await ToBytesAsync<string>(@__res, cancellationToken).ConfigureAwait(false), null);
         }
         else if (methodId == 4)
         {
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
+            var @text = await FromBytesAsync<string>(args[0], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("text");
             _instance.Method5(out @text);
-            return (Result: null, [await ToBytesAsync<string>(@text, cancellationToken)]);
+            return (Result: null, [await ToBytesAsync<string>(@text, cancellationToken).ConfigureAwait(false)]);
         }
         else if (methodId == 5)
         {
             if (args is null || args.Count != 1)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
+            var @text = await FromBytesAsync<string>(args[0], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("text");
             _instance.Method6(ref @text);
-            return (Result: null, [await ToBytesAsync<string>(@text, cancellationToken)]);
+            return (Result: null, [await ToBytesAsync<string>(@text, cancellationToken).ConfigureAwait(false)]);
         }
         else if (methodId == 6)
         {
             if (args is null || args.Count != 2)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @n = await FromBytesAsync<int>(args[0], cancellationToken);
-            var @outText = await FromBytesAsync<string[]>(args[1], cancellationToken) ?? throw new ArgumentNullException("outText");
+            var @n = await FromBytesAsync<int>(args[0], cancellationToken).ConfigureAwait(false);
+            var @outText = await FromBytesAsync<string[]>(args[1], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("outText");
             bool @__res = _instance.Method7(ref @n, out @outText);
-            return (Result: await ToBytesAsync<bool>(@__res, cancellationToken), [await ToBytesAsync<int>(@n, cancellationToken), await ToBytesAsync<string[]>(@outText, cancellationToken)]);
+            return (Result: await ToBytesAsync<bool>(@__res, cancellationToken).ConfigureAwait(false), [await ToBytesAsync<int>(@n, cancellationToken).ConfigureAwait(false), await ToBytesAsync<string[]>(@outText, cancellationToken).ConfigureAwait(false)]);
         }
         else if (methodId == 7)
         {
             string? @__res = _instance.Method8();
-            return (Result: await ToBytesAsync<string?>(@__res, cancellationToken), null);
+            return (Result: await ToBytesAsync<string?>(@__res, cancellationToken).ConfigureAwait(false), null);
         }
         else if (methodId == 8)
         {
             bool? @__res = _instance.Method9();
-            return (Result: await ToBytesAsync<bool?>(@__res, cancellationToken), null);
+            return (Result: await ToBytesAsync<bool?>(@__res, cancellationToken).ConfigureAwait(false), null);
         }
         else if (methodId == 9)
         {
-            await _instance.Method10();
+            await _instance.Method10().ConfigureAwait(false);
         }
         else if (methodId == 10)
         {
-            await _instance.Method11(cancellationToken);
+            await _instance.Method11(cancellationToken).ConfigureAwait(false);
         }
         else if (methodId == 11)
         {
             if (args is null || args.Count != 2)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @flag = await FromBytesAsync<bool>(args[0], cancellationToken);
-            var @text = await FromBytesAsync<string>(args[1], cancellationToken) ?? throw new ArgumentNullException("text");
-            await _instance.Method12(@flag, @text, cancellationToken);
+            var @flag = await FromBytesAsync<bool>(args[0], cancellationToken).ConfigureAwait(false);
+            var @text = await FromBytesAsync<string>(args[1], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("text");
+            await _instance.Method12(@flag, @text, cancellationToken).ConfigureAwait(false);
         }
         else if (methodId == 12)
         {
             if (args is null || args.Count != 2)
                 throw new ArgumentException("Invalid number of arguments");
 
-            var @text1 = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text1");
-            var @text2 = await FromBytesAsync<string>(args[1], cancellationToken) ?? throw new ArgumentNullException("text2");
-            var @__res = await _instance.Method13(@text1, @text2, cancellationToken);
-            return (Result: await ToBytesAsync<string>(@__res, cancellationToken), null);
+            var @text1 = await FromBytesAsync<string>(args[0], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("text1");
+            var @text2 = await FromBytesAsync<string>(args[1], cancellationToken).ConfigureAwait(false) ?? throw new ArgumentNullException("text2");
+            var @__res = await _instance.Method13(@text1, @text2, cancellationToken).ConfigureAwait(false);
+            return (Result: await ToBytesAsync<string>(@__res, cancellationToken).ConfigureAwait(false), null);
         }
 
         return (Result: null, Args: null);
@@ -376,12 +376,12 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
     async System.Threading.Tasks.Task MyCode.ITestService.Method10()
     {
         using var @_noTimeout = new Sigurn.Rpc.RpcContext { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-         await InvokeMethodAsync(9, [], false, System.Threading.CancellationToken.None);
+         await InvokeMethodAsync(9, [], false, System.Threading.CancellationToken.None).ConfigureAwait(false);
     }
 
     async System.Threading.Tasks.Task MyCode.ITestService.Method11(System.Threading.CancellationToken cancellationToken)
     {
-         await InvokeMethodAsync(10, [], false, cancellationToken);
+         await InvokeMethodAsync(10, [], false, cancellationToken).ConfigureAwait(false);
     }
 
     async System.Threading.Tasks.Task MyCode.ITestService.Method12(bool flag, string text, System.Threading.CancellationToken cancellationToken)
@@ -392,7 +392,7 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
             ToBytes<string>(text),
         ];
 
-         await InvokeMethodAsync(11, @args, false, cancellationToken);
+         await InvokeMethodAsync(11, @args, false, cancellationToken).ConfigureAwait(false);
     }
 
     async System.Threading.Tasks.Task<string> MyCode.ITestService.Method13(string text1, string text2, System.Threading.CancellationToken cancellationToken)
@@ -403,8 +403,8 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
             ToBytes<string>(text2),
         ];
 
-        var (@res, _) = await InvokeMethodAsync(12, @args, false, cancellationToken);
-        return await FromBytesAsync<string>(@res, cancellationToken) ?? throw new InvalidOperationException("Method return value cannot be null.");
+        var (@res, _) = await InvokeMethodAsync(12, @args, false, cancellationToken).ConfigureAwait(false);
+        return await FromBytesAsync<string>(@res, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("Method return value cannot be null.");
     }
 
     private System.EventHandler? _Event1;

@@ -111,7 +111,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _proxies.Clear();
         }
 
-        await DisposeInstances(instances);
+        await DisposeInstances(instances).ConfigureAwait(false);
 
         lock (_adapters)
         {
@@ -132,10 +132,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _sessionInstances.Clear();
         }
 
-        await DisposeInstances(instances);
+        await DisposeInstances(instances).ConfigureAwait(false);
 
         if (_channel is IAsyncDisposable ad)
-            await ad.DisposeAsync();
+            await ad.DisposeAsync().ConfigureAwait(false);
         else if (_channel is IDisposable d)
             d.Dispose();
     }
@@ -195,7 +195,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         if (tasks is null) return;
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     public object? GetProperty(Enum key)
@@ -288,7 +288,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
     internal async Task<T> CreateProxy<T>(CancellationToken cancellationToken)
     {
-        var instanceId = await _handler.GetServiceInstanceAsync(typeof(T).GUID, cancellationToken);
+        var instanceId = await _handler.GetServiceInstanceAsync(typeof(T).GUID, cancellationToken).ConfigureAwait(false);
         return (T)GetProxy(typeof(T), instanceId);
     }
 
@@ -503,7 +503,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(mcp.InstanceId) ??
                         throw new Exception("Unknown instance");
                     
-                    var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken);
+                    var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken).ConfigureAwait(false);
                     return new MethodResultPacket(mcp)
                     {
                         Result = Result,
@@ -515,7 +515,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(gpp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
-                    var value = await instance.GetPropertyValueAsync(gpp.PropertyId, cancellationToken);
+                    var value = await instance.GetPropertyValueAsync(gpp.PropertyId, cancellationToken).ConfigureAwait(false);
                     return new PropertyValuePacket(gpp)
                     {
                         Value = value
@@ -526,7 +526,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(spp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
-                    await instance.SetPropertyValueAsync(spp.PropertyId, spp.Value, cancellationToken);
+                    await instance.SetPropertyValueAsync(spp.PropertyId, spp.Value, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(spp);
                 }
                 else if (request is SubscribeForEventPacket sfep)
@@ -534,7 +534,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(sfep.InstanceId) ??
                         throw new Exception("Unknown instance");
                         
-                    await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken);
+                    await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(sfep);
                 }
                 else if (request is UnsubscribeFromEventPacket ufep)
@@ -542,7 +542,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(ufep.InstanceId) ??
                         throw new Exception("Unknown instance");
 
-                    await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken);
+                    await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(ufep);
                 }
                 else if (request is EventDataPacket)

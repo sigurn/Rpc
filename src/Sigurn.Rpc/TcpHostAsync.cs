@@ -31,7 +31,7 @@ public static class TcpHostAsync
 
         protected override async Task<IChannel?> Accept(CancellationToken cancellationToken)
         {
-            var socket = await _socket.AcceptAsync(cancellationToken);
+            var socket = await _socket.AcceptAsync(cancellationToken).ConfigureAwait(false);
             if (socket is null) return null;
             return new TcpChannel(socket, _protocolFactory());
         }

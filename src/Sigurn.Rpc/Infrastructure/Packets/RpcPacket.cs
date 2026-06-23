@@ -10,7 +10,7 @@ abstract class RpcPacket
         ArgumentNullException.ThrowIfNull(cancellationToken);
 
         using var stream = new MemoryStream(packet.Data);
-        return await Serializer.FromStreamAsync<RpcPacket>(stream, context, cancellationToken);
+        return await Serializer.FromStreamAsync<RpcPacket>(stream, context, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<T?> FromBytesAsync<T>(byte[]? data, SerializationContext context, CancellationToken cancellationToken)
@@ -18,13 +18,13 @@ abstract class RpcPacket
         if (data is null) return default;
         
         using var stream = new MemoryStream(data);
-        return await Serializer.FromStreamAsync<T>(stream, context, cancellationToken);
+        return await Serializer.FromStreamAsync<T>(stream, context, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<byte[]> ToBytesAsync<T>(T? value, SerializationContext context, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();
-        await Serializer.ToStreamAsync<T>(stream, value, context, cancellationToken);
+        await Serializer.ToStreamAsync<T>(stream, value, context, cancellationToken).ConfigureAwait(false);
         return stream.ToArray();
     }
 
@@ -82,7 +82,7 @@ abstract class RpcPacket
     public async Task<byte[]> ToBytesAsync(SerializationContext context, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();
-        await Serializer.ToStreamAsync(stream, this, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, this, context, cancellationToken).ConfigureAwait(false);
         return stream.ToArray();
     }
 
@@ -90,8 +90,8 @@ abstract class RpcPacket
     {
         public async Task<RpcPacket> FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
         {
-            var requestId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
-            var packageType = await Serializer.FromStreamAsync<PacketType>(stream, context, cancellationToken);
+            var requestId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
+            var packageType = await Serializer.FromStreamAsync<PacketType>(stream, context, cancellationToken).ConfigureAwait(false);
             RpcPacket? package = null;
             switch (packageType)
             {
@@ -159,16 +159,16 @@ abstract class RpcPacket
             if (package is null)
                 throw new Exception("Unknown packet type");
 
-            await package.FromStreamAsync(stream, context, cancellationToken);
+            await package.FromStreamAsync(stream, context, cancellationToken).ConfigureAwait(false);
             package.RequestId = requestId;
             return package;
         }
 
         public async Task ToStreamAsync(Stream stream, RpcPacket value, SerializationContext context, CancellationToken cancellationToken)
         {
-            await Serializer.ToStreamAsync(stream, value.RequestId, context, cancellationToken);
-            await Serializer.ToStreamAsync(stream, value._packageType, context, cancellationToken);
-            await value.ToStreamAsync(stream, context, cancellationToken);
+            await Serializer.ToStreamAsync(stream, value.RequestId, context, cancellationToken).ConfigureAwait(false);
+            await Serializer.ToStreamAsync(stream, value._packageType, context, cancellationToken).ConfigureAwait(false);
+            await value.ToStreamAsync(stream, context, cancellationToken).ConfigureAwait(false);
         }
     }
 }

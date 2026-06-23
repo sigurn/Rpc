@@ -27,14 +27,14 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
         {
             do
             {
-                var channel = await Accept(cancellationToken);
+                var channel = await Accept(cancellationToken).ConfigureAwait(false);
                 if (channel is null) return null;
 
                 var validator = Interlocked.Exchange(ref _validator, _validator);
-                if (validator is not null && !await validator(channel, cancellationToken))
+                if (validator is not null && !await validator(channel, cancellationToken).ConfigureAwait(false))
                 {
                     if (channel is IAsyncDisposable ad)
-                        await ad.DisposeAsync();
+                        await ad.DisposeAsync().ConfigureAwait(false);
                     else if (channel is IDisposable d)
                         d.Dispose();
 
@@ -63,7 +63,7 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
         if (Interlocked.Exchange(ref _isDisposed, true))
             return;
 
-        await InternalDispose();
+        await InternalDispose().ConfigureAwait(false);
     }
 
     protected abstract Task<IChannel?> Accept(CancellationToken cancellationToken);

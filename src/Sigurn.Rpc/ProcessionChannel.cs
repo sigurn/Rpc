@@ -110,7 +110,7 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
 
         try
         {
-            await _channel.OpenAsync(cancellationToken);
+            await _channel.OpenAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -135,7 +135,7 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
 
         try
         {
-            await _channel.CloseAsync(cancellationToken);
+            await _channel.CloseAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -155,7 +155,7 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
     /// <returns>The processed received packet.</returns>
     public async Task<IPacket> ReceiveAsync(CancellationToken cancellationToken)
     {
-        return await ProcessReceivedPacket(await _channel.ReceiveAsync(cancellationToken), cancellationToken);
+        return await ProcessReceivedPacket(await _channel.ReceiveAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -166,7 +166,7 @@ public abstract class ProcessionChannel : IChainedChannel, IDisposable
     /// <returns>The packet that was sent.</returns>
     public async Task<IPacket> SendAsync(IPacket packet, CancellationToken cancellationToken)
     {
-        return await _channel.SendAsync(await ProcessSendingPacket(packet, cancellationToken), cancellationToken);
+        return await _channel.SendAsync(await ProcessSendingPacket(packet, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     protected virtual void OnOpening(CancellationToken cancellationToken)

@@ -57,7 +57,7 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
             _isDisposed = true;
         }
 
-        await DisposeAsync(true);
+        await DisposeAsync(true).ConfigureAwait(false);
         GC.SuppressFinalize(this);
     }
 
@@ -130,7 +130,7 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
             try
             {
                 _logger.LogTrace("Wait for opening task completion");
-                await task;
+                await task.ConfigureAwait(false);
             }
             catch
             {
@@ -166,16 +166,16 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
             if (receiveTask is not null)
             {
                 _logger.LogTrace("Wait for receiving task completion");
-                await receiveTask.WaitNoThrow();
+                await receiveTask.WaitNoThrow().ConfigureAwait(false);
             }
 
             if (sendTask is not null)
             {
                 _logger.LogTrace("Wait for sending task completion");
-                await sendTask.WaitNoThrow();
+                await sendTask.WaitNoThrow().ConfigureAwait(false);
             }
 
-            await InternalCloseAsync(cancellationToken);
+            await InternalCloseAsync(cancellationToken).ConfigureAwait(false);
 
             lock (_lock)
                 _state = ChannelState.Closed;
@@ -221,7 +221,7 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
             RaiseOpening();
 
             openEvent.Set();
-            await task;
+            await task.ConfigureAwait(false);
 
             lock (_lock)
             {
@@ -274,7 +274,7 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 
         try
         {
-            return await task;
+            return await task.ConfigureAwait(false);
         }
         finally
         {
@@ -311,7 +311,7 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 
         try
         {
-            return await task;
+            return await task.ConfigureAwait(false);
         }
         finally
         {
@@ -426,7 +426,7 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
     protected async virtual ValueTask DisposeAsync(bool disposing)
     {
         if (!disposing) return;
-        await CloseAsync(CancellationToken.None);
+        await CloseAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     protected void RaiseOpening()
@@ -513,10 +513,10 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 
     protected async Task DelayedOpenAsync(WaitHandle waitHandle, CancellationToken cancellationToken)
     {
-        if (!await waitHandle.WaitOneAsync(cancellationToken))
+        if (!await waitHandle.WaitOneAsync(cancellationToken).ConfigureAwait(false))
             throw new TaskCanceledException();
 
-        await InternalOpenAsync(cancellationToken);
+        await InternalOpenAsync(cancellationToken).ConfigureAwait(false);
     }
 
     protected abstract Task InternalOpenAsync(CancellationToken cancellationToken);

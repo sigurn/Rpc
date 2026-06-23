@@ -201,7 +201,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
         try
         {
             startEvent.Set();
-            var channel = await task;
+            var channel = await task.ConfigureAwait(false);
 
             lock(_lock)
             {
@@ -252,7 +252,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
         {
             openCancellationToken.Cancel();
             if (openTask is not null)
-                await openTask;
+                await openTask.ConfigureAwait(false);
         }
 
         IChannel? channel;
@@ -282,11 +282,11 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
             cancellationTokenSource?.Cancel();
 
             if (reopeningTask is not null)
-                await reopeningTask;
+                await reopeningTask.ConfigureAwait(false);
 
             if (channel is not null)
             {
-                await channel.CloseAsync(cancellationToken);
+                await channel.CloseAsync(cancellationToken).ConfigureAwait(false);
                 if (channel is IDisposable d) d.Dispose();
                 channel = null;
             }
@@ -343,7 +343,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
         if (channel is null)
             throw new InvalidOperationException("There is no connection");
 
-        return await channel.SendAsync(packet, cancellationToken);
+        return await channel.SendAsync(packet, cancellationToken).ConfigureAwait(false);
     }
 
     private EventHandler? _opening;
@@ -529,10 +529,10 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 
     private async Task<IChannel> DelayedConnectToServerAsync(WaitHandle waitHandle, IEnumerator<Func<CancellationToken, Task<IChannel>>> factories, CancellationToken cancellationToken)
     {
-        if (!await waitHandle.WaitOneAsync(cancellationToken))
+        if (!await waitHandle.WaitOneAsync(cancellationToken).ConfigureAwait(false))
             throw new TaskCanceledException();
 
-        return await ConnectToServerAsync(factories, cancellationToken);
+        return await ConnectToServerAsync(factories, cancellationToken).ConfigureAwait(false);
     }
 
     private const string _cannotConnectMessage = "None of the channel factories was able to get connected to the server";
@@ -544,10 +544,10 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
             try
             {
                 if (factories.Current is null) continue;
-                var channel = await factories.Current(cancellationToken);
+                var channel = await factories.Current(cancellationToken).ConfigureAwait(false);
                 if (channel is null) continue;
                 if (channel.State == ChannelState.Created)
-                    await channel.OpenAsync(cancellationToken);
+                    await channel.OpenAsync(cancellationToken).ConfigureAwait(false);
 
                 channel.Faulted += ChannelFaultedHandler;
                 channel.Closed += ChannelClosedHandler;
@@ -606,7 +606,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
             {
                 try
                 {
-                    var channel = await ConnectToServerAsync(factories, cancellationToken);
+                    var channel = await ConnectToServerAsync(factories, cancellationToken).ConfigureAwait(false);
 
                     lock(_lock)
                     {
@@ -631,7 +631,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
                         interval = _reopenInterval;
                     }
 
-                    await Task.Delay(interval, cancellationToken);
+                    await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

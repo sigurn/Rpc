@@ -86,7 +86,7 @@ class RpcHandler : IDisposable
             Func<RpcPacket, CancellationToken, Task<RpcPacket?>> proxyHandler = async (packet, cancellationToken) =>
             {
                 if (packet is not T typedPacket) return null;
-                return await handler(typedPacket, cancellationToken);
+                return await handler(typedPacket, cancellationToken).ConfigureAwait(false);
             };
 
             _packetHandlers.Add(proxyHandler);
@@ -112,8 +112,8 @@ class RpcHandler : IDisposable
 
     public async Task SendAsync(RpcPacket packet, CancellationToken cancellationToken)
     {
-        var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken));
-        await _channel.SendAsync(request, cancellationToken);
+        var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken).ConfigureAwait(false));
+        await _channel.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<RpcPacket> RequestAsync(RpcPacket packet, CancellationToken cancellationToken)
@@ -129,21 +129,21 @@ class RpcHandler : IDisposable
             if (!_requests.TryAdd(packet.RequestId, completionSource))
                 throw new InvalidOperationException("Request with the same Id is already being processed");
 
-            var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken));
-            await _channel.SendAsync(request, cancellationToken);
+            var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken).ConfigureAwait(false));
+            await _channel.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
             ctr = cancellationToken.Register(async () =>
             {
-                var cancelPacket = IPacket.Create(await new CancelRequestPacket(packet).ToBytesAsync(_context, CancellationToken.None));
-                await _channel.SendAsync(cancelPacket, CancellationToken.None);
+                var cancelPacket = IPacket.Create(await new CancelRequestPacket(packet).ToBytesAsync(_context, CancellationToken.None).ConfigureAwait(false));
+                await _channel.SendAsync(cancelPacket, CancellationToken.None).ConfigureAwait(false);
                 if (_requests.TryRemove(packet.RequestId, out var rcs))
                     rcs.TrySetCanceled();
             });
-            return await completionSource.Task.WaitAsync(timeout);
+            return await completionSource.Task.WaitAsync(timeout).ConfigureAwait(false);
         }
         finally
         {
-            if (ctr.HasValue) await ctr.Value.DisposeAsync();
+            if (ctr.HasValue) await ctr.Value.DisposeAsync().ConfigureAwait(false);
             _requests.Remove(packet.RequestId, out var _);
         }
     }
@@ -161,17 +161,17 @@ class RpcHandler : IDisposable
             if (!_requests.TryAdd(packet.RequestId, completionSource))
                 throw new InvalidOperationException("Request with the same Id is already being processed");
 
-            var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken));
-            await _channel.SendAsync(request, cancellationToken);
+            var request = IPacket.Create(await packet.ToBytesAsync(_context, cancellationToken).ConfigureAwait(false));
+            await _channel.SendAsync(request, cancellationToken).ConfigureAwait(false);
             ctr = cancellationToken.Register(async () =>
             {
-                var cancelPacket = IPacket.Create(await new CancelRequestPacket(packet).ToBytesAsync(_context, CancellationToken.None));
-                await _channel.SendAsync(cancelPacket, CancellationToken.None);
+                var cancelPacket = IPacket.Create(await new CancelRequestPacket(packet).ToBytesAsync(_context, CancellationToken.None).ConfigureAwait(false));
+                await _channel.SendAsync(cancelPacket, CancellationToken.None).ConfigureAwait(false);
                 if (_requests.TryRemove(packet.RequestId, out var rcs))
                     rcs.TrySetCanceled();
             });
 
-            var answer = await completionSource.Task.WaitAsync(timeout);
+            var answer = await completionSource.Task.WaitAsync(timeout).ConfigureAwait(false);
             if (answer is T a)
                 return a;
             else if (answer is ExceptionPacket exp)
@@ -183,7 +183,7 @@ class RpcHandler : IDisposable
         }
         finally
         {
-            if (ctr.HasValue) await ctr.Value.DisposeAsync();
+            if (ctr.HasValue) await ctr.Value.DisposeAsync().ConfigureAwait(false);
             _requests.Remove(packet.RequestId, out var _);
         }
     }
@@ -195,7 +195,7 @@ class RpcHandler : IDisposable
             InterfaceId = interfaceId
         };
 
-        var answer = await RequestAsync<ServiceInstancePacket>(request, cancellationToken);
+        var answer = await RequestAsync<ServiceInstancePacket>(request, cancellationToken).ConfigureAwait(false);
         return answer.InstanceId;
     }
 
@@ -214,7 +214,7 @@ class RpcHandler : IDisposable
             InstanceId = instanceId
         };
 
-        await SendAsync(request, cancellationToken);
+        await SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(Guid instanceId, int methodId, IReadOnlyList<byte[]> args, bool oneWay, CancellationToken cancellationToken)
@@ -227,7 +227,7 @@ class RpcHandler : IDisposable
             OneWay = oneWay
         };
 
-        var answer = await RequestAsync<MethodResultPacket>(request, cancellationToken);
+        var answer = await RequestAsync<MethodResultPacket>(request, cancellationToken).ConfigureAwait(false);
         return (answer.Result, answer.Args);
     }
 
@@ -239,7 +239,7 @@ class RpcHandler : IDisposable
             PropertyId = propertyId,
         };
 
-        var answer = await RequestAsync<PropertyValuePacket>(request, cancellationToken);
+        var answer = await RequestAsync<PropertyValuePacket>(request, cancellationToken).ConfigureAwait(false);
         return answer.Value;
     }
 
@@ -252,7 +252,7 @@ class RpcHandler : IDisposable
             Value = value
         };
 
-        await RequestAsync<SuccessPacket>(request, cancellationToken);
+        await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task AttachEventAsync(Guid instanceId, int eventId, CancellationToken cancellationToken)
@@ -263,7 +263,7 @@ class RpcHandler : IDisposable
             EventId = eventId,
         };
 
-        await RequestAsync<SuccessPacket>(request, cancellationToken);
+        await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task DetachEventAsync(Guid instanceId, int eventId, CancellationToken cancellationToken)
@@ -274,7 +274,7 @@ class RpcHandler : IDisposable
             EventId = eventId,
         };
 
-        await RequestAsync<SuccessPacket>(request, cancellationToken);
+        await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
     }
 
     private void OnChannelOpened(object? sender, EventArgs args)
@@ -341,7 +341,7 @@ class RpcHandler : IDisposable
             // Cancel in flight handler tokens explicitly so blocking handlers unwind immediately
             // rather than relying solely on linked token propagation through the handling token.
             CancelPendingRequests();
-            await task.WaitAsync(TimeSpan.FromSeconds(5));
+            await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
         catch(TimeoutException)
         {
@@ -405,9 +405,9 @@ class RpcHandler : IDisposable
 
                         if (answer is null) return;
 
-                        var answerPacket = packet.CreateAnswer(await answer.ToBytesAsync(_context, cancellationToken));
+                        var answerPacket = packet.CreateAnswer(await answer.ToBytesAsync(_context, cancellationToken).ConfigureAwait(false));
                         if (_channel.State != ChannelState.Opened || cancellationToken.IsCancellationRequested) return;
-                        await _channel.SendAsync(answerPacket, cancellationToken);
+                        await _channel.SendAsync(answerPacket, cancellationToken).ConfigureAwait(false);
                     });
 
                 lock (tasks)
@@ -451,12 +451,12 @@ class RpcHandler : IDisposable
         var packetHandlers = GetPacketHandlers();
         foreach (var packetHandler in packetHandlers)
         {
-            var response = await packetHandler(request, cancellationToken);
+            var response = await packetHandler(request, cancellationToken).ConfigureAwait(false);
             if (response is not null) return response;
         }
 
         if (_handler is null) return null;
-        return await _handler(request, cancellationToken);
+        return await _handler(request, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<bool> WaitForChannelOpenAsync(IChannel channel, CancellationToken cancellationToken)

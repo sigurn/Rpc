@@ -95,8 +95,8 @@ class ProcessChannel : BaseChannel
             if (process is not null)
             {
                 process.Exited -= OnProcessExited;
-                await SendSignalAsync(process.Id, cancellationToken);
-                await process.WaitForExitAsync(cancellationToken);                
+                await SendSignalAsync(process.Id, cancellationToken).ConfigureAwait(false);
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);                
             }
         }
         finally
@@ -146,7 +146,7 @@ class ProcessChannel : BaseChannel
         try
         {
             while(size != 0)
-                size = _protocol.ApplyNextReceivedBlock(await ReceiveData(stream, size, cancellationToken));
+                size = _protocol.ApplyNextReceivedBlock(await ReceiveData(stream, size, cancellationToken).ConfigureAwait(false));
 
             return IPacket.Create(_protocol.EndReceiving());
         }
@@ -185,13 +185,13 @@ class ProcessChannel : BaseChannel
             {
                 buf = _protocol.GetNextBlockToSend();
                 if (buf is not null)
-                    await SendData(stream, buf, cancellationToken);
+                    await SendData(stream, buf, cancellationToken).ConfigureAwait(false);
             }
             while(buf is not null);
 
             _protocol.EndSending();
 
-            await stream.FlushAsync();
+            await stream.FlushAsync().ConfigureAwait(false);
         }
         catch(IOException)
         {
@@ -233,11 +233,11 @@ class ProcessChannel : BaseChannel
             var readTask = stream.ReadAsync(new Memory<byte>(buf, pos, size - pos)).AsTask();
             var cancelTask = cancellationToken.WaitHandle.WaitOneAsync(CancellationToken.None);
 
-            var task = await Task.WhenAny(readTask, cancelTask);
+            var task = await Task.WhenAny(readTask, cancelTask).ConfigureAwait(false);
             if (task == cancelTask)
                 throw new TaskCanceledException();
             
-            var len = await readTask;
+            var len = await readTask.ConfigureAwait(false);
 
             if (len == 0)
                 throw new IOException("Cannot read data from process output");
@@ -253,11 +253,11 @@ class ProcessChannel : BaseChannel
         var readTask = stream.WriteAsync(new ReadOnlyMemory<byte>(data, 0, data.Length)).AsTask();
         var cancelTask = cancellationToken.WaitHandle.WaitOneAsync(CancellationToken.None);
 
-        var task = await Task.WhenAny(readTask, cancelTask);
+        var task = await Task.WhenAny(readTask, cancelTask).ConfigureAwait(false);
         if (task == cancelTask)
             throw new TaskCanceledException();
 
-        await readTask;
+        await readTask.ConfigureAwait(false);
     }
 
     public static async Task<bool> SendSignalAsync(int pid, CancellationToken cancellationToken)

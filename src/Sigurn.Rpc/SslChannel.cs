@@ -200,7 +200,7 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
     {
         var socket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
-        await socket.ConnectAsync(_endPoint, cancellationToken);
+        await socket.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
         var sslStream = new SslStream(new NetworkStream(socket), false, ValidateRemoteCertificate);
 
@@ -214,7 +214,7 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         if (_certificate is not null)
             authOptions.ClientCertificates = new X509CertificateCollection(new X509Certificate[] { _certificate });
 
-        await sslStream.AuthenticateAsClientAsync(authOptions, cancellationToken);
+        await sslStream.AuthenticateAsClientAsync(authOptions, cancellationToken).ConfigureAwait(false);
 
         lock (_lock)
         {
@@ -271,7 +271,7 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         try
         {
             while (size != 0)
-                size = _protocol.ApplyNextReceivedBlock(await ReceiveData(stream, size, cancellationToken));
+                size = _protocol.ApplyNextReceivedBlock(await ReceiveData(stream, size, cancellationToken).ConfigureAwait(false));
 
             return IPacket.Create(_protocol.EndReceiving());
         }
@@ -313,7 +313,7 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
             {
                 buf = _protocol.GetNextBlockToSend();
                 if (buf is not null)
-                    await SendData(stream, buf, cancellationToken);
+                    await SendData(stream, buf, cancellationToken).ConfigureAwait(false);
             }
             while (buf is not null);
 
@@ -346,7 +346,7 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
 
         while (pos < size)
         {
-            var len = await stream.ReadAsync(new Memory<byte>(buf, pos, size - pos), cancellationToken);
+            var len = await stream.ReadAsync(new Memory<byte>(buf, pos, size - pos), cancellationToken).ConfigureAwait(false);
             if (len == 0)
                 throw new SocketException((int)SocketError.ConnectionAborted);
 
@@ -358,7 +358,7 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
 
     private static async Task SendData(Stream stream, byte[] data, CancellationToken cancellationToken)
     {
-        await stream.WriteAsync(data, cancellationToken);
+        await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
     }
 
     private bool ValidateRemoteCertificate(object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors sslPolicyErrors)

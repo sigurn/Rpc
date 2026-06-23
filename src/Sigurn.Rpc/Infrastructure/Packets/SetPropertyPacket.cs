@@ -37,15 +37,15 @@ class SetPropertyPacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
-        _propertyId = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
-        _value = await Serializer.FromStreamAsync<byte[]>(stream, context, cancellationToken);
+        _instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
+        _propertyId = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken).ConfigureAwait(false);
+        _value = await Serializer.FromStreamAsync<byte[]>(stream, context, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _propertyId, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _value, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _propertyId, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _value, context, cancellationToken).ConfigureAwait(false);
     }
 }

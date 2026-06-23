@@ -99,7 +99,7 @@ public class TcpChannel : BaseChannel, IAddressableChannel
     {
         var socket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
-        await socket.ConnectAsync(_endPoint, cancellationToken);
+        await socket.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
         lock (_lock)
             _socket = socket;
@@ -141,7 +141,7 @@ public class TcpChannel : BaseChannel, IAddressableChannel
         try
         {
             while(size != 0)
-                size = _protocol.ApplyNextReceivedBlock(await ReceiveData(socket, size, cancellationToken));
+                size = _protocol.ApplyNextReceivedBlock(await ReceiveData(socket, size, cancellationToken).ConfigureAwait(false));
 
             return IPacket.Create(_protocol.EndReceiving());
         }
@@ -183,7 +183,7 @@ public class TcpChannel : BaseChannel, IAddressableChannel
             {
                 buf = _protocol.GetNextBlockToSend();
                 if (buf is not null)
-                    await SendData(socket, buf, cancellationToken);
+                    await SendData(socket, buf, cancellationToken).ConfigureAwait(false);
             }
             while(buf is not null);
 

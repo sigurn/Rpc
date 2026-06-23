@@ -122,7 +122,7 @@ public class ServiceHost : IServiceHost
         {
             try
             {
-                return await _queue.Reader.ReadAsync(cancellationToken);
+                return await _queue.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

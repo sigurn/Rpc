@@ -39,7 +39,7 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await CloseAsync(CancellationToken.None);
+        await CloseAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -122,11 +122,11 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
         if (cts is not null)
         {
             cts.Cancel();
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).ConfigureAwait(false);
             cts.Dispose();
         }
 
-        await _channel.CloseAsync(cancellationToken);
+        await _channel.CloseAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

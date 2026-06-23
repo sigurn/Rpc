@@ -49,9 +49,9 @@ public class ServiceInfo : ISerializable
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        var typeGuid = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
-        InterfaceName = (await Serializer.FromStreamAsync<string>(stream, context, cancellationToken)) ?? string.Empty;
-        ShareType = await Serializer.FromStreamAsync<ShareWithin>(stream, context, cancellationToken);
+        var typeGuid = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
+        InterfaceName = (await Serializer.FromStreamAsync<string>(stream, context, cancellationToken).ConfigureAwait(false)) ?? string.Empty;
+        ShareType = await Serializer.FromStreamAsync<ShareWithin>(stream, context, cancellationToken).ConfigureAwait(false);
         InterfaceType = GetTypeById(typeGuid);
     }
 
@@ -65,9 +65,9 @@ public class ServiceInfo : ISerializable
     {
         if (InterfaceType is null)
             throw new InvalidOperationException("Interface type cannot be null");
-        await Serializer.ToStreamAsync(stream, InterfaceType.GUID, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, InterfaceName, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, ShareType, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, InterfaceType.GUID, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, InterfaceName, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, ShareType, context, cancellationToken).ConfigureAwait(false);
     }
 
     private static Type? GetTypeById(Guid id)

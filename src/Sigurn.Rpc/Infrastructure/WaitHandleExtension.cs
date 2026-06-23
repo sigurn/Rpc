@@ -79,7 +79,7 @@ static class WaitHandleExtensions
             // Re-check after subscribing to close the race where the channel reaches
             // the target state between the initial check and the subscription.
             if (channel.State == state) tcs.TrySetResult();
-            await tcs.Task;
+            await tcs.Task.ConfigureAwait(false);
         }
         finally
         {

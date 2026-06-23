@@ -25,14 +25,14 @@ class GetInstancePacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _id = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
-        _instanceId = await Serializer.FromStreamAsync<Guid?>(stream, context, cancellationToken);
+        _id = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
+        _instanceId = await Serializer.FromStreamAsync<Guid?>(stream, context, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _id, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _id, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken).ConfigureAwait(false);
     }
 }
 

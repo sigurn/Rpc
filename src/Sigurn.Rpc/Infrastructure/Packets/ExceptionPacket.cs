@@ -40,15 +40,15 @@ class ExceptionPacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _type = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken) ?? string.Empty;
-        _message = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken) ?? string.Empty;
-        _stackTrace = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken);
+        _type = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken).ConfigureAwait(false) ?? string.Empty;
+        _message = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken).ConfigureAwait(false) ?? string.Empty;
+        _stackTrace = await Serializer.FromStreamAsync<string>(stream, context, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _type, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _message, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _stackTrace, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _type, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _message, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _stackTrace, context, cancellationToken).ConfigureAwait(false);
     }
 }

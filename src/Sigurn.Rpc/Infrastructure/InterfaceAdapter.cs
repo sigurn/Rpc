@@ -180,7 +180,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
     protected async Task<T?> FromBytesAsync<T>(byte[]? data, CancellationToken cancellationToken)
     {
-        return await RpcPacket.FromBytesAsync<T>(data, _context, cancellationToken);
+        return await RpcPacket.FromBytesAsync<T>(data, _context, cancellationToken).ConfigureAwait(false);
     }
 
     protected void SendEvent(int eventId, params byte[][] args)

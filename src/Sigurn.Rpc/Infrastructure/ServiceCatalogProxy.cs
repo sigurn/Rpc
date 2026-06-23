@@ -9,9 +9,9 @@ sealed class ServiceCatalogProxy : InterfaceProxy, IServiceCatalog
 
     public async Task<IReadOnlyList<ServiceInfo>> GetServicesAsync(CancellationToken cancellationToken)
     {
-        (var res, var _) = await InvokeMethodAsync(0, [], false, cancellationToken);
+        (var res, var _) = await InvokeMethodAsync(0, [], false, cancellationToken).ConfigureAwait(false);
         if (res is null) throw new InvalidOperationException("Server returned null instead of result.");
 
-        return await FromBytesAsync<IReadOnlyList<ServiceInfo>>(res, cancellationToken) ?? [];
+        return await FromBytesAsync<IReadOnlyList<ServiceInfo>>(res, cancellationToken).ConfigureAwait(false) ?? [];
     }
 }

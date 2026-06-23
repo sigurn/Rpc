@@ -37,7 +37,7 @@ public static class SslHostAsync
 
         protected override async Task<IChannel?> Accept(CancellationToken cancellationToken)
         {
-            var socket = await _socket.AcceptAsync(cancellationToken);
+            var socket = await _socket.AcceptAsync(cancellationToken).ConfigureAwait(false);
             if (socket is null) return null;
             return new SslChannel(socket, _certificate, _certificateValidator, _requireClientCertificate, _protocolFactory());
         }

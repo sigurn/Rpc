@@ -39,17 +39,17 @@ sealed class MethodCallPacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _oneWay = await Serializer.FromStreamAsync<bool>(stream, context, cancellationToken);
-        _instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
-        _methodId = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken);
-        _args = await Serializer.FromStreamAsync<IReadOnlyList<byte[]>>(stream, context, cancellationToken) ?? [];
+        _oneWay = await Serializer.FromStreamAsync<bool>(stream, context, cancellationToken).ConfigureAwait(false);
+        _instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
+        _methodId = await Serializer.FromStreamAsync<int>(stream, context, cancellationToken).ConfigureAwait(false);
+        _args = await Serializer.FromStreamAsync<IReadOnlyList<byte[]>>(stream, context, cancellationToken).ConfigureAwait(false) ?? [];
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _oneWay, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _methodId, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _args, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _oneWay, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _methodId, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _args, context, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -19,11 +19,11 @@ sealed class ServiceCatalogAdapter : InterfaceAdapter
                 throw new InvalidOperationException("Invalid number of arguments");
             if (oneWay) return (null, null);
 
-            var services = await _catalog.GetServicesAsync(cancellationToken);
+            var services = await _catalog.GetServicesAsync(cancellationToken).ConfigureAwait(false);
 
-            return (await ToBytesAsync(services, cancellationToken), null);
+            return (await ToBytesAsync(services, cancellationToken).ConfigureAwait(false), null);
         }
         
-        return await base.InvokeMethodAsync(methodId, args, oneWay, cancellationToken);
+        return await base.InvokeMethodAsync(methodId, args, oneWay, cancellationToken).ConfigureAwait(false);
     }
 }

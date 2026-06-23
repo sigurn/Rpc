@@ -51,7 +51,7 @@ public class GZipChannel : ProcessionChannel
         using var srcStream = new MemoryStream(packet.Data[pos..]);
         using var gzipStream = new GZipStream(srcStream, CompressionLevel.Optimal);
 
-        await gzipStream.CopyToAsync(dstStream);
+        await gzipStream.CopyToAsync(dstStream).ConfigureAwait(false);
 
         return new Packet(packet, dstStream.ToArray());
     }
@@ -72,8 +72,8 @@ public class GZipChannel : ProcessionChannel
         using var srcStream = new MemoryStream(packet.Data);
         using var gzipStream = new GZipStream(dstStream, CompressionLevel.Optimal);
 
-        await dstStream.WriteAsync(_marker, cancellationToken);
-        await srcStream.CopyToAsync(gzipStream);
+        await dstStream.WriteAsync(_marker, cancellationToken).ConfigureAwait(false);
+        await srcStream.CopyToAsync(gzipStream).ConfigureAwait(false);
 
         return new Packet(packet, dstStream.ToArray());
     }

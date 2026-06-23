@@ -1,0 +1,5 @@
+# Library code must not capture the synchronization context.
+# CA2007 highlights any await missing ConfigureAwait so the deadlock
+# class (sync-over-async from a UI thread) cannot reappear.
+[*.cs]
+dotnet_diagnostic.CA2007.severity = warning

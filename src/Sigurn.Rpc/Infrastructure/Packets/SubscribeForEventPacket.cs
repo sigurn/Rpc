@@ -30,13 +30,13 @@ class SubscribeForEventPacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
-        _eventId = await Serializer.FromStreamAsync<int>(stream, context,cancellationToken);
+        _instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
+        _eventId = await Serializer.FromStreamAsync<int>(stream, context,cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken);
-        await Serializer.ToStreamAsync(stream, _eventId, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _instanceId, context, cancellationToken).ConfigureAwait(false);
+        await Serializer.ToStreamAsync(stream, _eventId, context, cancellationToken).ConfigureAwait(false);
     }
 }

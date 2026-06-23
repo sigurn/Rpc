@@ -19,7 +19,7 @@ class InterfaceSerializer : IGeneralSerializer
         if (!type.IsInterface)
             throw new ArgumentException($"Interface serializer cannot deserialize type {type}");
 
-        Guid instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken);
+        Guid instanceId = await Serializer.FromStreamAsync<Guid>(stream, context, cancellationToken).ConfigureAwait(false);
         return GetSession(context).GetProxy(type, instanceId);
     }
 
@@ -29,7 +29,7 @@ class InterfaceSerializer : IGeneralSerializer
             throw new ArgumentException($"Interface serializer cannot serialize type {type}");
 
         Guid instanceId = GetSession(context).RegisterInstance(type, value);
-        await Serializer.ToStreamAsync(stream, instanceId, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, instanceId, context, cancellationToken).ConfigureAwait(false);
     }
 
     private static Session GetSession(SerializationContext context)

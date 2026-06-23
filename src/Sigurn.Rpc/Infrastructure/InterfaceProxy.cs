@@ -235,7 +235,7 @@ public class InterfaceProxy : IDisposable
     {
         CheckDisposed();
 
-        var value = await CallTarget.GetPropertyValueAsync(propertyId, cancellationToken);
+        var value = await CallTarget.GetPropertyValueAsync(propertyId, cancellationToken).ConfigureAwait(false);
         if (value is null)
             return default;
 
@@ -263,7 +263,7 @@ public class InterfaceProxy : IDisposable
     {
         CheckDisposed();
 
-        await CallTarget.SetPropertyValueAsync(propertyId, ToBytes<T>(value), cancellationToken);
+        await CallTarget.SetPropertyValueAsync(propertyId, ToBytes<T>(value), cancellationToken).ConfigureAwait(false);
     }
 
     protected void AttachEventHandler(int eventId)
@@ -287,7 +287,7 @@ public class InterfaceProxy : IDisposable
             _events.Add(eventId, 1);
         }
 
-        await CallTarget.AttachEventHandlerAsync(eventId, cancellationToken);
+        await CallTarget.AttachEventHandlerAsync(eventId, cancellationToken).ConfigureAwait(false);
     }
 
     protected void DetachEventHandler(int eventId)
@@ -311,7 +311,7 @@ public class InterfaceProxy : IDisposable
             _events.Remove(eventId);
         }
 
-        await CallTarget.DetachEventHandlerAsync(eventId, cancellationToken);
+        await CallTarget.DetachEventHandlerAsync(eventId, cancellationToken).ConfigureAwait(false);
     }
 
     private void CheckDisposed()

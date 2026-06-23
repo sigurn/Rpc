@@ -76,7 +76,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         {
             while(!cancellationToken.IsCancellationRequested && tasks.Count > 0)
             {
-                var task = await Task.WhenAny(tasks.ToImmutableArray());
+                var task = await Task.WhenAny(tasks.ToImmutableArray()).ConfigureAwait(false);
 
                 if (task == cancellationTask)
                     return;
@@ -125,7 +125,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 if (Disconnected is not null)
                     Disconnected(this, new SessionEventArgs(s));
                     
-                await s.DisposeAsync();
+                await s.DisposeAsync().ConfigureAwait(false);
             }
         }
     }
@@ -334,7 +334,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         {
             while(!cancellationToken.IsCancellationRequested)
             {
-                var channel = await acceptor.AcceptAsync(cancellationToken);
+                var channel = await acceptor.AcceptAsync(cancellationToken).ConfigureAwait(false);
                 if (channel is null) return;
 
                 if (channel.State != ChannelState.Opened) continue;
@@ -353,7 +353,7 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         finally
         {
             if (acceptor is IAsyncDisposable ad)
-                await ad.DisposeAsync();
+                await ad.DisposeAsync().ConfigureAwait(false);
             else if (acceptor is IDisposable d)
                 d.Dispose();
         }

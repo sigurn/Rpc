@@ -109,8 +109,8 @@ public class AesChannel : ProcessionChannel
         using var dstStream = new MemoryStream();
         using (var crypto = new CryptoStream(srcStream, _aes.CreateDecryptor(key, iv), CryptoStreamMode.Read))
         {
-            var _ = await Serializer.FromStreamAsync<int>(crypto, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken);
-            await crypto.CopyToAsync(dstStream, cancellationToken);
+            var _ = await Serializer.FromStreamAsync<int>(crypto, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken).ConfigureAwait(false);
+            await crypto.CopyToAsync(dstStream, cancellationToken).ConfigureAwait(false);
         }
 
         return new Packet(packet, dstStream.ToArray());
@@ -137,9 +137,9 @@ public class AesChannel : ProcessionChannel
         using var dstStream = new MemoryStream();
         using (var crypto = new CryptoStream(dstStream, _aes.CreateEncryptor(key, iv), CryptoStreamMode.Write))
         {
-            await dstStream.WriteAsync(_marker, cancellationToken);
-            await Serializer.ToStreamAsync(crypto, salt, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken);
-            await srcStream.CopyToAsync(crypto, cancellationToken);
+            await dstStream.WriteAsync(_marker, cancellationToken).ConfigureAwait(false);
+            await Serializer.ToStreamAsync(crypto, salt, SerializationContext.Default with { AllowNullValues = false, ByteOrder = ByteOrder.Network }, cancellationToken).ConfigureAwait(false);
+            await srcStream.CopyToAsync(crypto, cancellationToken).ConfigureAwait(false);
         }        
 
         return new Packet(packet, dstStream.ToArray());

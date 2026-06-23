@@ -23,11 +23,11 @@ class PropertyValuePacket : RpcPacket
 
     protected override async Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        _value = await Serializer.FromStreamAsync<byte[]>(stream, context,cancellationToken);
+        _value = await Serializer.FromStreamAsync<byte[]>(stream, context,cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken)
     {
-        await Serializer.ToStreamAsync(stream, _value, context, cancellationToken);
+        await Serializer.ToStreamAsync(stream, _value, context, cancellationToken).ConfigureAwait(false);
     }
 }

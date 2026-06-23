@@ -69,7 +69,7 @@ sealed class QueueChannel : IChainedChannel, IDisposable
 
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
-        await _channel.CloseAsync(cancellationToken);
+        await _channel.CloseAsync(cancellationToken).ConfigureAwait(false);
 
         IReadOnlyList<SendWorkItem> items;
         lock(_sendQueue)
