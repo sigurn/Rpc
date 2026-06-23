@@ -300,6 +300,26 @@ class RpcHandler : IDisposable
 
         foreach(var kvp in requests)
             kvp.Value.SetCanceled();
+
+        // The channel is gone, so any in flight server side handlers will never be able to
+        // deliver their result. Cancel their tokens right away so blocking handlers can unwind
+        // cooperatively instead of hanging until the teardown timeout.
+        CancelPendingRequests();
+    }
+
+    private void CancelPendingRequests()
+    {
+        foreach (var kvp in _cancellationSources.ToArray())
+        {
+            try
+            {
+                kvp.Value.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The source may have already been disposed by the handling loop cleanup.
+            }
+        }
     }
 
     private async Task StopHandling()
@@ -318,6 +338,9 @@ class RpcHandler : IDisposable
         {
             if (task is null || task.IsCompleted) return;
             if (cts is not null) cts.Cancel();
+            // Cancel in flight handler tokens explicitly so blocking handlers unwind immediately
+            // rather than relying solely on linked token propagation through the handling token.
+            CancelPendingRequests();
             await task.WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch(TimeoutException)
@@ -326,8 +349,10 @@ class RpcHandler : IDisposable
         }
         finally
         {
+            // Task instances do not need to be disposed; a Task that is still running (e.g. a
+            // hung handler that survived the WaitAsync timeout) throws from Dispose() because it
+            // is not in a completion state. Just drop the reference and let it finish on its own.
             cts?.Dispose();
-            task?.Dispose();            
         }
     }
 
@@ -406,11 +431,11 @@ class RpcHandler : IDisposable
             tasks.Clear();
         }
 
-        if (!Task.WaitAll(waitTasks, TimeSpan.FromSeconds(5)))
-        {
-            foreach (var t in waitTasks)
-                if (!t.IsCompleted) t.Dispose();
-        }
+        // Give in flight handlers a chance to finish, but never call Dispose() on the wrappers:
+        // a Task that is still running (a hung handler) is not in a completion state and Dispose()
+        // would throw InvalidOperationException, crashing the handling loop. Incomplete tasks are
+        // simply abandoned - they complete on their own once their cancelled handlers unwind.
+        Task.WaitAll(waitTasks, TimeSpan.FromSeconds(5));
 
         var tokens = _cancellationSources.ToArray();
         _cancellationSources.Clear();

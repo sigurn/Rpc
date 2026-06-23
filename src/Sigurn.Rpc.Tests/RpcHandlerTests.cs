@@ -451,4 +451,62 @@ public class RpcHandlerTests
         rcts.Cancel();
         Assert.True(requestCancelledEvent.WaitOne(TimeSpan.FromSeconds(5)));
     }
+
+    [Fact(Timeout = 15000)]
+    public async Task ClientDisconnectCancelsLongRunningHandlerImmediatelyTest()
+    {
+        // Reproduces the server crash / hang when a client disconnects while a long running,
+        // blocking RPC handler is still in flight. On disconnect the server channel faults,
+        // and the handler's cancellation token must be cancelled immediately (not after the
+        // 5 second teardown timeout) so blocking handlers can unwind cooperatively. Tearing
+        // down the server handler afterwards must not throw.
+        RpcHandler? serverHandler = null;
+        using var host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+
+        using ManualResetEvent connectEvent = new ManualResetEvent(false);
+        using ManualResetEvent requestReceivedEvent = new ManualResetEvent(false);
+        using ManualResetEvent requestCancelledEvent = new ManualResetEvent(false);
+        host.Connected += (s, a) =>
+        {
+            serverHandler = new RpcHandler(a.Channel);
+            connectEvent.Set();
+        };
+
+        host.Open();
+
+        var channel = new TcpChannel(host.EndPoint);
+        var handler = new RpcHandler(channel);
+
+        CancellationTokenSource cts = new CancellationTokenSource();
+        await channel.OpenAsync(cts.Token);
+
+        Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.NotNull(serverHandler);
+
+        serverHandler.Handle<SuccessPacket>(async (p, ct) =>
+        {
+            using var ctr = ct.Register(() => requestCancelledEvent.Set());
+            requestReceivedEvent.Set();
+            // Simulate a blocking, no-timeout handler that only unwinds on cancellation.
+            ct.WaitHandle.WaitOne();
+            return null;
+        });
+
+        var packet = new SuccessPacket();
+        // Fire the request without awaiting - the server handler will block until cancelled.
+        _ = handler.RequestAsync(packet, cts.Token);
+        Assert.True(requestReceivedEvent.WaitOne(TimeSpan.FromSeconds(5)));
+
+        // Abruptly disconnect the client.
+        handler.Dispose();
+        channel.Dispose();
+
+        // The blocking server handler must be cancelled promptly after the disconnect,
+        // well before the 5 second teardown timeout.
+        Assert.True(await requestCancelledEvent.WaitOneAsync(TimeSpan.FromSeconds(2), CancellationToken.None));
+
+        // Tearing down the server handler with a (now cancelled) in flight handler must not throw.
+        serverHandler.Dispose();
+    }
 }
