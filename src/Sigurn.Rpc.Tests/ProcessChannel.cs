@@ -74,6 +74,40 @@ public class ProcessChannelTests
     }
 
     [Fact(Timeout = 15000)]
+    public async Task ConfigureCallbackIsInvokedAndChannelStillWorks()
+    {
+        ProcessChannel? channel = null;
+        var configured = false;
+        var fileName = Path.Combine(_directory, "Sigurn.Rpc.TestProcess");
+        using RpcClient client = new RpcClient(async ct =>
+        {
+            channel = new ProcessChannel(fileName, psi =>
+            {
+                configured = true;
+                // A caller would set credentials here; setting an env var is enough to
+                // prove the hook runs without needing elevated privileges. The channel
+                // must re-apply the redirection flags after this runs.
+                psi.Environment["SIGURN_RPC_TEST"] = "1";
+                psi.RedirectStandardInput = false;
+                psi.RedirectStandardOutput = false;
+                psi.UseShellExecute = true;
+            });
+            await channel.OpenAsync(ct);
+            return channel;
+        });
+        await client.OpenAsync(CancellationToken.None);
+        Assert.True(configured);
+        Assert.NotNull(channel);
+        var process = Process.GetProcessById(channel.ProcessId);
+        Assert.False(process.HasExited);
+        // RPC over stdin/stdout still works, proving redirection flags were re-applied.
+        var service = await client.GetService<ITestProcess>(CancellationToken.None);
+        Assert.NotNull(service);
+        Assert.Equal(15, service.TestMathod(5));
+        await client.CloseAsync(CancellationToken.None);
+    }
+
+    [Fact(Timeout = 15000)]
     public async Task FinishProcess()
     {
         ProcessChannel? channel = null;

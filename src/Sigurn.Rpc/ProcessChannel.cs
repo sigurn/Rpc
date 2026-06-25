@@ -5,16 +5,35 @@ using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
 
-class ProcessChannel : BaseChannel
+/// <summary>
+/// A transport channel that communicates with a child process over its standard input and
+/// output streams.
+/// </summary>
+/// <remarks>
+/// The channel can either wrap a pair of already-open streams, or start a new process from a
+/// file name (optionally with arguments and a customization callback). When it starts the
+/// process it always redirects the child's standard input and output and forces
+/// <c>UseShellExecute = false</c>, so RPC traffic flows over those streams. Closing the channel
+/// terminates the started process.
+/// </remarks>
+public class ProcessChannel : BaseChannel
 {
     private static readonly ILogger<ProcessChannel> _logger = RpcLogging.CreateLogger<ProcessChannel>();
 
     private readonly ProcessStartInfo? _processInfo;
+    private readonly Action<ProcessStartInfo>? _configure;
     private readonly IProtocol _protocol;
     private Process? _process;
     private Stream? _inputStream;
     private Stream? _outputStream;
 
+    /// <summary>
+    /// Creates a channel over a pair of already-open streams. No process is started; the channel
+    /// is immediately considered opened.
+    /// </summary>
+    /// <param name="inputStream">The stream the channel writes outgoing data to.</param>
+    /// <param name="outputStream">The stream the channel reads incoming data from.</param>
+    /// <param name="protocol">The framing protocol to use.</param>
     public ProcessChannel(Stream inputStream, Stream outputStream, IProtocol protocol)
     {
         ArgumentNullException.ThrowIfNull(inputStream);
@@ -27,6 +46,11 @@ class ProcessChannel : BaseChannel
         State = ChannelState.Opened;
     }
 
+    /// <summary>
+    /// Creates a channel that starts the given executable when the channel is opened.
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="protocol">The framing protocol to use.</param>
     public ProcessChannel(string fileName, IProtocol protocol)
     {
         _processInfo = new ProcessStartInfo()
@@ -38,6 +62,12 @@ class ProcessChannel : BaseChannel
         _protocol = protocol;
     }
 
+    /// <summary>
+    /// Creates a channel that starts the given executable with arguments when the channel is opened.
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="args">The command-line arguments.</param>
+    /// <param name="protocol">The framing protocol to use.</param>
     public ProcessChannel(string fileName, string args, IProtocol protocol)
     {
         _processInfo = new ProcessStartInfo()
@@ -50,16 +80,119 @@ class ProcessChannel : BaseChannel
         _protocol = protocol;
     }
 
+    /// <summary>
+    /// Creates a channel that starts the given executable using the default protocol when the
+    /// channel is opened.
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
     public ProcessChannel(string fileName)
         : this(fileName, new ChannelProtocol())
     {
     }
 
+    /// <summary>
+    /// Creates a channel that starts the given executable with arguments using the default
+    /// protocol when the channel is opened.
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="args">The command-line arguments.</param>
     public ProcessChannel(string fileName, string args)
         : this(fileName, args, new ChannelProtocol())
     {
     }
 
+    /// <summary>
+    /// Creates a channel that starts the given executable, letting the caller customize how
+    /// the process is launched (for example, to run it as a specific OS user).
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="configure">
+    /// A callback invoked with the <see cref="ProcessStartInfo"/> just before the process is
+    /// started. Use it to set credentials and other options. On Windows you can set
+    /// <c>UserName</c>/<c>Domain</c>/<c>Password</c> (or <c>PasswordInClearText</c>) and
+    /// <c>LoadUserProfile</c>. On Linux/macOS those properties are not supported, so launch
+    /// through a wrapper instead (e.g. <c>sudo -u user</c> / <c>runuser</c>). The channel
+    /// re-applies the stdin/stdout redirection flags it requires after this callback runs.
+    /// </param>
+    /// <param name="protocol">The framing protocol to use.</param>
+    /// <example>
+    /// Windows:
+    /// <code>
+    /// var channel = new ProcessChannel("worker.exe", psi =>
+    /// {
+    ///     psi.UserName = "bob";
+    ///     psi.Domain = "CORP";
+    ///     psi.PasswordInClearText = "secret";
+    ///     psi.LoadUserProfile = true;
+    /// }, new ChannelProtocol());
+    /// </code>
+    /// Linux/macOS:
+    /// <code>
+    /// var channel = new ProcessChannel("sudo", "-u bob worker", psi => { }, new ChannelProtocol());
+    /// </code>
+    /// </example>
+    public ProcessChannel(string fileName, Action<ProcessStartInfo> configure, IProtocol protocol)
+        : this(fileName, protocol)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _configure = configure;
+    }
+
+    /// <summary>
+    /// Creates a channel that starts the given executable with arguments, letting the caller
+    /// customize how the process is launched (for example, to run it as a specific OS user).
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="args">The command-line arguments.</param>
+    /// <param name="configure">
+    /// A callback invoked with the <see cref="ProcessStartInfo"/> just before the process is
+    /// started. See <see cref="ProcessChannel(string, Action{ProcessStartInfo}, IProtocol)"/>
+    /// for usage notes on running as a specific user across platforms.
+    /// </param>
+    /// <param name="protocol">The framing protocol to use.</param>
+    public ProcessChannel(string fileName, string args, Action<ProcessStartInfo> configure, IProtocol protocol)
+        : this(fileName, args, protocol)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _configure = configure;
+    }
+
+    /// <summary>
+    /// Creates a channel that starts the given executable using the default protocol, letting
+    /// the caller customize how the process is launched (for example, to run it as a specific OS user).
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="configure">
+    /// A callback invoked with the <see cref="ProcessStartInfo"/> just before the process is
+    /// started. See <see cref="ProcessChannel(string, Action{ProcessStartInfo}, IProtocol)"/>
+    /// for usage notes on running as a specific user across platforms.
+    /// </param>
+    public ProcessChannel(string fileName, Action<ProcessStartInfo> configure)
+        : this(fileName, configure, new ChannelProtocol())
+    {
+    }
+
+    /// <summary>
+    /// Creates a channel that starts the given executable with arguments using the default
+    /// protocol, letting the caller customize how the process is launched (for example, to run
+    /// it as a specific OS user).
+    /// </summary>
+    /// <param name="fileName">The executable to start.</param>
+    /// <param name="args">The command-line arguments.</param>
+    /// <param name="configure">
+    /// A callback invoked with the <see cref="ProcessStartInfo"/> just before the process is
+    /// started. See <see cref="ProcessChannel(string, Action{ProcessStartInfo}, IProtocol)"/>
+    /// for usage notes on running as a specific user across platforms.
+    /// </param>
+    public ProcessChannel(string fileName, string args, Action<ProcessStartInfo> configure)
+        : this(fileName, args, configure, new ChannelProtocol())
+    {
+    }
+
+    /// <summary>
+    /// Gets the operating-system identifier of the started process.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The process has not been started yet.</exception>
     public int ProcessId
     {
         get
@@ -113,6 +246,14 @@ class ProcessChannel : BaseChannel
 
         if (_processInfo is null)
             throw new InvalidOperationException("Cannot open unknown process");
+
+        _configure?.Invoke(_processInfo);
+
+        // The channel owns these — re-apply after the callback so it can't be broken.
+        // UseShellExecute=false is also required for UserName/Password on Windows.
+        _processInfo.RedirectStandardInput = true;
+        _processInfo.RedirectStandardOutput = true;
+        _processInfo.UseShellExecute = false;
 
         var process = Process.Start(_processInfo);
 
@@ -260,6 +401,13 @@ class ProcessChannel : BaseChannel
         await readTask.ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Sends a termination signal to the process with the given identifier (Ctrl+C on Windows,
+    /// SIGINT on Linux/macOS) so it can shut down gracefully.
+    /// </summary>
+    /// <param name="pid">The identifier of the target process.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A task that resolves to <c>true</c> once the signal has been sent.</returns>
     public static async Task<bool> SendSignalAsync(int pid, CancellationToken cancellationToken)
     {
         ProcessTermination.TerminateProcess(pid);
