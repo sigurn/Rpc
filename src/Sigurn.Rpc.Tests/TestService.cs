@@ -258,13 +258,6 @@ class TestServiceAdapter : InterfaceAdapter
         }
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        if (!disposing) return;
-
-        (_instance as IDisposable)?.Dispose();
-    }
-
     private void OnTestEvent(object? sender, EventArgs args)
     {
         SendEvent(1, ToBytes(args));

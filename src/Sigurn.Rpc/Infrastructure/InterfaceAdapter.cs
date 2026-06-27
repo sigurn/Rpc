@@ -114,6 +114,12 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
         Dispose(true);
 
+        // The adapter owns the wrapped instance: disposing the adapter disposes
+        // the service. This is the single owner for every sharing scope (None,
+        // Session, Host, Process) and for sub-services returned from calls, so
+        // session-scoped services release their resources on session teardown.
+        (_instance as IDisposable)?.Dispose();
+
         _disposable?.Dispose();
     }
 

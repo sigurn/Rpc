@@ -119,6 +119,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _adapters.Clear();
         }
 
+        // Symmetric with AttachSession in RegisterInstance: detach before releasing
+        // so ISessionsAware services are notified while still alive.
+        DetachSessions(instances);
+
         // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
         // A shared (Host/Process) instance lives as one RefCounter across every
         // session, so disposing it directly here would destroy it while other
@@ -160,6 +164,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             instances = [.. _adapters.Values];
             _adapters.Clear();
         }
+
+        // Symmetric with AttachSession in RegisterInstance: detach before releasing
+        // so ISessionsAware services are notified while still alive.
+        DetachSessions(instances);
 
         // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
         // A shared (Host/Process) instance lives as one RefCounter across every
@@ -367,8 +375,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                         lock (_instances)
                             _instances.Remove(instance);
 
+                        // Disposing the adapter disposes the wrapped instance too
+                        // (InterfaceAdapter owns it), so no separate instance dispose here.
                         (x as IDisposable)?.Dispose();
-                        (instance as IDisposable)?.Dispose();
                     }
                 );
                 _instances.Add(instance, refCounter);
@@ -376,6 +385,23 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
 
         return RegisterInstance(refCounter);
+    }
+
+    private void DetachSessions(IEnumerable<RefCounter<ICallTarget>> instances)
+    {
+        foreach (var instance in instances)
+        {
+            if (instance.Value is not ISessionsAware sas) continue;
+
+            try
+            {
+                sas.DetachSession(this);
+            }
+            catch
+            {
+                // A misbehaving service must not abort teardown of the rest.
+            }
+        }
     }
 
     private void ReleaseInstance(Guid instanceId)
