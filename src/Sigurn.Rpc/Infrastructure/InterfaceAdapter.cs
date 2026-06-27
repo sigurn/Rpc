@@ -107,7 +107,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     // subscriptions when a session detaches — otherwise the source-event handler lingers
     // and accumulates across reconnects.
     private readonly object _eventSubscriptionsLock = new();
-    private readonly Dictionary<ISession, HashSet<int>> _eventSubscriptions = new();
+    private readonly Dictionary<Guid, HashSet<int>> _eventSubscriptions = new();
 
     protected InterfaceAdapter(Type interfaceType, object instance)
     {
@@ -182,10 +182,10 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
         {
             lock (_eventSubscriptionsLock)
             {
-                if (!_eventSubscriptions.TryGetValue(session, out var events))
+                if (!_eventSubscriptions.TryGetValue(session.Id, out var events))
                 {
                     events = [];
-                    _eventSubscriptions.Add(session, events);
+                    _eventSubscriptions.Add(session.Id, events);
                 }
                 events.Add(eventId);
             }
@@ -202,7 +202,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
         {
             lock (_eventSubscriptionsLock)
             {
-                if (_eventSubscriptions.TryGetValue(session, out var events))
+                if (_eventSubscriptions.TryGetValue(session.Id, out var events))
                     events.Remove(eventId);
             }
         }
@@ -271,7 +271,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     {
         HashSet<int>? events;
         lock (_eventSubscriptionsLock)
-            _eventSubscriptions.Remove(session, out events);
+            _eventSubscriptions.Remove(session.Id, out events);
 
         // Undo the event subscriptions this session made — important for a shared adapter
         // that keeps living after the session is gone.
