@@ -27,6 +27,11 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     private readonly Dictionary<Guid, RefCounter<ICallTarget>> _adapters = [];
     private readonly Dictionary<Guid, RefCounter<ICallTarget>> _proxies = [];
 
+    // The EventTriggered lambda this session wired onto each registered adapter, kept so
+    // it can be removed on teardown — otherwise a shared (Host/Process) adapter keeps
+    // pushing events to this session's closed channel. Guarded by the _adapters lock.
+    private readonly Dictionary<Guid, EventHandler<EventDataArgs>> _adapterEventHandlers = [];
+
     private readonly IServiceHost? _serviceHost = null;
     private readonly SerializationContext _context;
 
@@ -113,22 +118,27 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         await DisposeInstances(instances).ConfigureAwait(false);
 
+        KeyValuePair<Guid, RefCounter<ICallTarget>>[] adapters;
+        Dictionary<Guid, EventHandler<EventDataArgs>> handlers;
         lock (_adapters)
         {
-            instances = [.. _adapters.Values];
+            adapters = [.. _adapters];
             _adapters.Clear();
+            handlers = new(_adapterEventHandlers);
+            _adapterEventHandlers.Clear();
         }
 
-        // Symmetric with AttachSession in RegisterInstance: detach before releasing
-        // so ISessionsAware services are notified while still alive.
-        DetachSessions(instances);
+        // Remove this session's event fan-out and notify ISessionsAware services before
+        // releasing, while the (possibly shared) adapter is still alive.
+        foreach (var (id, counter) in adapters)
+            CleanupAdapter(counter, handlers.GetValueOrDefault(id));
 
         // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
         // A shared (Host/Process) instance lives as one RefCounter across every
         // session, so disposing it directly here would destroy it while other
         // sessions still hold references — Release disposes only at the last one.
-        foreach (var instance in instances)
-            instance.Release();
+        foreach (var (_, counter) in adapters)
+            counter.Release();
 
         lock (_sessionInstances)
         {
@@ -159,22 +169,27 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         foreach (var instance in instances)
             instance.Dispose();
 
+        KeyValuePair<Guid, RefCounter<ICallTarget>>[] adapters;
+        Dictionary<Guid, EventHandler<EventDataArgs>> handlers;
         lock (_adapters)
         {
-            instances = [.. _adapters.Values];
+            adapters = [.. _adapters];
             _adapters.Clear();
+            handlers = new(_adapterEventHandlers);
+            _adapterEventHandlers.Clear();
         }
 
-        // Symmetric with AttachSession in RegisterInstance: detach before releasing
-        // so ISessionsAware services are notified while still alive.
-        DetachSessions(instances);
+        // Remove this session's event fan-out and notify ISessionsAware services before
+        // releasing, while the (possibly shared) adapter is still alive.
+        foreach (var (id, counter) in adapters)
+            CleanupAdapter(counter, handlers.GetValueOrDefault(id));
 
         // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
         // A shared (Host/Process) instance lives as one RefCounter across every
         // session, so disposing it directly here would destroy it while other
         // sessions still hold references — Release disposes only at the last one.
-        foreach (var instance in instances)
-            instance.Release();
+        foreach (var (_, counter) in adapters)
+            counter.Release();
 
         lock (_sessionInstances)
         {
@@ -332,26 +347,29 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     {
         var id = Guid.NewGuid();
 
+        EventHandler<EventDataArgs> handler = (s, e) =>
+        {
+            var ec = EventContext.Current;
+
+            if (ec is not null)
+            {
+                if (ec.Include is not null && !ec.Include.Contains(this)) return;
+                if (ec.Exclude is not null && ec.Exclude.Contains(this)) return;
+            }
+
+            var packet = new EventDataPacket(id, e.EventId, e.Args);
+            _handler.SendAsync(packet, CancellationToken.None).Wait();
+        };
+
         lock (_adapters)
         {
             foreach (var kvp in _adapters)
                 if (kvp.Value == instance) return kvp.Key;
 
             _adapters.Add(id, instance);
+            _adapterEventHandlers.Add(id, handler);
             instance.AddRef();
-            instance.Value.EventTriggered += (s, e) =>
-            {
-                var ec = EventContext.Current;
-
-                if (ec is not null)
-                {
-                    if (ec.Include is not null && !ec.Include.Contains(this)) return;
-                    if (ec.Exclude is not null && ec.Exclude.Contains(this)) return;
-                }
-
-                var packet = new EventDataPacket(id, e.EventId, e.Args);
-                _handler.SendAsync(packet, CancellationToken.None).Wait();
-            };
+            instance.Value.EventTriggered += handler;
         }
 
         if (instance.Value is ISessionsAware sas)
@@ -387,36 +405,52 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         return RegisterInstance(refCounter);
     }
 
-    private void DetachSessions(IEnumerable<RefCounter<ICallTarget>> instances)
+    // Undoes what this session wired onto an adapter, before its reference is released.
+    // Safe while other sessions still hold a shared adapter: it removes only this
+    // session's own EventTriggered lambda. Best-effort — a misbehaving service must not
+    // abort teardown.
+    private void CleanupAdapter(RefCounter<ICallTarget> counter, EventHandler<EventDataArgs>? handler)
     {
-        foreach (var instance in instances)
+        ICallTarget adapter;
+        try
         {
-            if (instance.Value is not ISessionsAware sas) continue;
+            adapter = counter.Value;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
 
+        // Stop this session's event fan-out so a shared adapter stops pushing to the
+        // (closing) channel.
+        if (handler is not null)
+            adapter.EventTriggered -= handler;
+
+        if (adapter is ISessionsAware sas)
+        {
             try
             {
                 sas.DetachSession(this);
             }
             catch
             {
-                // A misbehaving service must not abort teardown of the rest.
             }
         }
     }
 
     private void ReleaseInstance(Guid instanceId)
     {
-        RefCounter<ICallTarget>? instance = null;
+        RefCounter<ICallTarget>? instance;
+        EventHandler<EventDataArgs>? handler;
         lock (_adapters)
         {
             if (!_adapters.TryGetValue(instanceId, out instance)) return;
-            {
-                _adapters.Remove(instanceId);
-            }
+
+            _adapters.Remove(instanceId);
+            _adapterEventHandlers.Remove(instanceId, out handler);
         }
 
-        if (instance.Value is ISessionsAware sas)
-            sas.DetachSession(this);
+        CleanupAdapter(instance, handler);
 
         instance.Release();
     }

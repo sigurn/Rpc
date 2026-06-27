@@ -102,6 +102,13 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     private SerializationContext _context = RpcPacket.DefaultSerializationContext;
     private readonly object _instance;
 
+    // Event ids each session subscribed to through this adapter. A shared (Host/Process)
+    // adapter outlives the sessions that use it, so it owns undoing their event handler
+    // subscriptions when a session detaches — otherwise the source-event handler lingers
+    // and accumulates across reconnects.
+    private readonly object _eventSubscriptionsLock = new();
+    private readonly Dictionary<ISession, HashSet<int>> _eventSubscriptions = new();
+
     protected InterfaceAdapter(Type interfaceType, object instance)
     {
         InterfaceType = interfaceType;
@@ -160,6 +167,45 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     public virtual Task DetachEventHandlerAsync(int eventId, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
+    }
+
+    // The session-facing entry points (callers hold the adapter as ICallTarget). They wrap
+    // the virtual handlers to keep per-session subscription bookkeeping so DetachSession can
+    // undo them — the generated/overridden handlers stay untouched.
+    async Task ICallTarget.AttachEventHandlerAsync(int eventId, CancellationToken cancellationToken)
+    {
+        var session = Session.Current;
+
+        await AttachEventHandlerAsync(eventId, cancellationToken).ConfigureAwait(false);
+
+        if (session is not null)
+        {
+            lock (_eventSubscriptionsLock)
+            {
+                if (!_eventSubscriptions.TryGetValue(session, out var events))
+                {
+                    events = [];
+                    _eventSubscriptions.Add(session, events);
+                }
+                events.Add(eventId);
+            }
+        }
+    }
+
+    async Task ICallTarget.DetachEventHandlerAsync(int eventId, CancellationToken cancellationToken)
+    {
+        var session = Session.Current;
+
+        await DetachEventHandlerAsync(eventId, cancellationToken).ConfigureAwait(false);
+
+        if (session is not null)
+        {
+            lock (_eventSubscriptionsLock)
+            {
+                if (_eventSubscriptions.TryGetValue(session, out var events))
+                    events.Remove(eventId);
+            }
+        }
     }
 
     public event EventHandler<EventDataArgs>? EventTriggered;
@@ -223,6 +269,27 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
     void ISessionsAware.DetachSession(ISession session)
     {
+        HashSet<int>? events;
+        lock (_eventSubscriptionsLock)
+            _eventSubscriptions.Remove(session, out events);
+
+        // Undo the event subscriptions this session made — important for a shared adapter
+        // that keeps living after the session is gone.
+        if (events is not null)
+        {
+            foreach (var eventId in events)
+            {
+                try
+                {
+                    DetachEventHandlerAsync(eventId, CancellationToken.None).GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // Best effort: a faulting handler must not abort teardown.
+                }
+            }
+        }
+
         (_instance as ISessionsAware)?.DetachSession(session);
     }
 }
