@@ -49,6 +49,7 @@ public class InterfaceProxy : IDisposable
     static InterfaceProxy()
     {
         RegisterProxy<IServiceCatalog>(x => new ServiceCatalogProxy(x));
+        RegisterProxy<IRemoteStream>(x => new RemoteStreamProxy(x));
     }
 
     internal static T CreateProxy<T>(Guid instanceId, RefCounter<ICallTarget> callTarget, SerializationContext context)

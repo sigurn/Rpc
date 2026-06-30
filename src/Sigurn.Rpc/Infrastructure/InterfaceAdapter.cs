@@ -12,6 +12,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     static InterfaceAdapter()
     {
         RegisterAdapter<IServiceCatalog>(x => new ServiceCatalogAdapter(x));
+        RegisterAdapter<IRemoteStream>(x => new RemoteStreamAdapter(x));
     }
 
     public static void RegisterAdapter<T>(Func<T, InterfaceAdapter> factory)

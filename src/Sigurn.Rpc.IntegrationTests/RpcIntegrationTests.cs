@@ -69,6 +69,57 @@ public sealed class TestService : ITestService
     }
 }
 
+[RemoteInterface]
+public interface IFileService
+{
+    // Download: server hands a stream to the client.
+    Task<Stream> OpenAsync(CancellationToken cancellationToken);
+
+    // Upload: client hands a stream to the server, which reads it via server->client calls.
+    Task<byte[]> SaveAsync(Stream data, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// MemoryStream that records whether it has been disposed, so a test can assert that disposing the
+/// client-side <c>Stream</c> releases the remote instance and closes the source stream.
+/// </summary>
+public sealed class TrackingStream : MemoryStream
+{
+    public TrackingStream() { }
+    public TrackingStream(byte[] buffer) : base(buffer, writable: false) { }
+
+    public bool Disposed { get; private set; }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            Disposed = true;
+        base.Dispose(disposing);
+    }
+}
+
+public sealed class TestFileService : IFileService
+{
+    public byte[] Content { get; set; } = [];
+    public TrackingStream? LastOpened { get; private set; }
+    public byte[]? LastSaved { get; private set; }
+
+    public Task<Stream> OpenAsync(CancellationToken cancellationToken)
+    {
+        var stream = new TrackingStream(Content);
+        LastOpened = stream;
+        return Task.FromResult<Stream>(stream);
+    }
+
+    public async Task<byte[]> SaveAsync(Stream data, CancellationToken cancellationToken)
+    {
+        using var ms = new MemoryStream();
+        await data.CopyToAsync(ms, cancellationToken);
+        LastSaved = ms.ToArray();
+        return LastSaved;
+    }
+}
+
 /// <summary>
 /// Minimal single-threaded SynchronizationContext that captures posted continuations into a
 /// queue, mimicking a UI message loop. While the owning thread blocks on a sync-over-async call,
@@ -97,6 +148,38 @@ public class RpcIntegrationTests
         await client.OpenAsync(CancellationToken.None);
         var service = await client.GetService<ITestService>(CancellationToken.None);
         return (client, service);
+    }
+
+    private static async Task<(RpcClient client, T service)> ConnectAsync<T>(TcpHost tcpHost) where T : class
+    {
+        var client = new RpcClient(async cancellationToken =>
+        {
+            var channel = new TcpChannel(tcpHost.EndPoint);
+            await channel.OpenAsync(cancellationToken);
+            return channel;
+        });
+        await client.OpenAsync(CancellationToken.None);
+        var service = await client.GetService<T>(CancellationToken.None);
+        return (client, service);
+    }
+
+    private static byte[] DeterministicBytes(int length)
+    {
+        var data = new byte[length];
+        for (var i = 0; i < length; i++)
+            data[i] = (byte)((i * 31 + 7) % 256);
+        return data;
+    }
+
+    private static async Task<bool> WaitForAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition()) return true;
+            await Task.Delay(20);
+        }
+        return condition();
     }
 
     [Fact]
@@ -242,5 +325,122 @@ public class RpcIntegrationTests
 
         using var ctx = new RpcContext { Timeout = TimeSpan.FromMilliseconds(50) };
         await testService.SlowMethodNoTimeoutAsync(300, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Stream_Download_ReadsAllBytes()
+    {
+        var content = DeterministicBytes(200_000); // spans multiple 64 KiB chunks
+        var service = new TestFileService { Content = content };
+
+        using var tcpHost = new TcpHost();
+        var serviceHost = new ServiceHost(tcpHost);
+        serviceHost.RegisterSerive<IFileService>(ShareWithin.None, () => service);
+        serviceHost.Start();
+
+        var (client, fileService) = await ConnectAsync<IFileService>(tcpHost);
+        using var _ = client;
+
+        await using var stream = await fileService.OpenAsync(CancellationToken.None);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, CancellationToken.None);
+
+        Assert.Equal(content, ms.ToArray());
+    }
+
+    [Fact]
+    public async Task Stream_Download_LargePayload()
+    {
+        var content = DeterministicBytes(3 * 1024 * 1024); // 3 MiB, well over the 1 MiB packet limit
+        var service = new TestFileService { Content = content };
+
+        using var tcpHost = new TcpHost();
+        var serviceHost = new ServiceHost(tcpHost);
+        serviceHost.RegisterSerive<IFileService>(ShareWithin.None, () => service);
+        serviceHost.Start();
+
+        var (client, fileService) = await ConnectAsync<IFileService>(tcpHost);
+        using var _ = client;
+
+        await using var stream = await fileService.OpenAsync(CancellationToken.None);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, CancellationToken.None);
+
+        Assert.Equal(content, ms.ToArray());
+    }
+
+    [Fact]
+    public async Task Stream_Download_SeekAndLength()
+    {
+        var content = DeterministicBytes(150_000);
+        var service = new TestFileService { Content = content };
+
+        using var tcpHost = new TcpHost();
+        var serviceHost = new ServiceHost(tcpHost);
+        serviceHost.RegisterSerive<IFileService>(ShareWithin.None, () => service);
+        serviceHost.Start();
+
+        var (client, fileService) = await ConnectAsync<IFileService>(tcpHost);
+        using var _ = client;
+
+        await using var stream = await fileService.OpenAsync(CancellationToken.None);
+
+        Assert.True(stream.CanRead);
+        Assert.True(stream.CanSeek);
+        Assert.Equal(content.Length, stream.Length);
+
+        stream.Seek(100_000, SeekOrigin.Begin);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, CancellationToken.None);
+
+        Assert.Equal(content[100_000..], ms.ToArray());
+    }
+
+    [Fact]
+    public async Task Stream_Upload_ServerReceivesAllBytes()
+    {
+        var content = DeterministicBytes(200_000);
+        var service = new TestFileService();
+
+        using var tcpHost = new TcpHost();
+        var serviceHost = new ServiceHost(tcpHost);
+        serviceHost.RegisterSerive<IFileService>(ShareWithin.None, () => service);
+        serviceHost.Start();
+
+        var (client, fileService) = await ConnectAsync<IFileService>(tcpHost);
+        using var _ = client;
+
+        using var source = new MemoryStream(content);
+        var echoed = await fileService.SaveAsync(source, CancellationToken.None);
+
+        Assert.Equal(content, echoed);
+        Assert.Equal(content, service.LastSaved);
+    }
+
+    [Fact]
+    public async Task Stream_Dispose_ClosesServerStream()
+    {
+        var content = DeterministicBytes(1_000);
+        var service = new TestFileService { Content = content };
+
+        using var tcpHost = new TcpHost();
+        var serviceHost = new ServiceHost(tcpHost);
+        serviceHost.RegisterSerive<IFileService>(ShareWithin.None, () => service);
+        serviceHost.Start();
+
+        var (client, fileService) = await ConnectAsync<IFileService>(tcpHost);
+        using var _ = client;
+
+        var stream = await fileService.OpenAsync(CancellationToken.None);
+        var read = await stream.ReadAsync(new byte[16], CancellationToken.None);
+        Assert.True(read > 0);
+
+        Assert.NotNull(service.LastOpened);
+        Assert.False(service.LastOpened!.Disposed);
+
+        await stream.DisposeAsync();
+
+        Assert.True(await WaitForAsync(() => service.LastOpened!.Disposed, TimeSpan.FromSeconds(5)),
+            "Disposing the client-side stream should release the remote instance and close the source stream.");
     }
 }
