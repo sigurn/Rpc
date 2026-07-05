@@ -507,10 +507,11 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
     {
         lock (_lock)
         {
-            if (_state == ChannelState.Faulted) return;
+            if (_state == ChannelState.Faulted) { _logger.LogTrace("GoToFaultedState: already faulted -> skip RaiseFaulted"); return; }
             _state = ChannelState.Faulted;
         }
 
+        _logger.LogTrace("GoToFaultedState: raising Faulted");
         RaiseFaulted();
     }
 
@@ -572,6 +573,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 
     private void ChannelFaultedHandler(object? sender, EventArgs args)
     {
+        _logger.LogTrace("ChannelFaultedHandler: state={State} autoReopen={AutoReopen}", _state, AutoReopen);
         GoToFaultedState();
 
         if (!AutoReopen) return;

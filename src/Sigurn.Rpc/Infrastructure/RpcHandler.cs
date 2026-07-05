@@ -181,6 +181,11 @@ class RpcHandler : IDisposable
 
             throw new Exception("Unknown server answer");
         }
+        catch (TimeoutException)
+        {
+            _logger.LogTrace("RequestAsync {RequestId} TIMED OUT after {Timeout}", packet.RequestId, timeout);
+            throw;
+        }
         finally
         {
             if (ctr.HasValue) await ctr.Value.DisposeAsync().ConfigureAwait(false);
@@ -299,6 +304,7 @@ class RpcHandler : IDisposable
     private void OnChannelFaulted(object? sender, EventArgs args)
     {
         var requests = _requests.ToArray();
+        _logger.LogTrace("OnChannelFaulted fired: cancelling {Count} pending requests", requests.Length);
         _requests.Clear();
 
         foreach(var kvp in requests)
