@@ -104,9 +104,14 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 if (task.IsFaulted)
                 {
                     if (_logger.IsEnabled(LogLevel.Error))
-                        _logger.LogError("Connection handling is faulted. Exception {exception}", task.Exception);                    
+                        _logger.LogError("Connection handling is faulted. Exception {exception}", task.Exception);
                 }
-            }            
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Service host run loop failed");
+            throw;
         }
         finally
         {
@@ -253,8 +258,15 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
         lock(_sessions)
             _sessions.Add(session);
 
-        if (Connected is not null)
-            Connected(this, new SessionEventArgs(session));
+        try
+        {
+            if (Connected is not null)
+                Connected(this, new SessionEventArgs(session));
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError(ex, "Connected event failed");
+        }
     }
 
     private void OnDisconnected(Session session)
@@ -268,8 +280,15 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 return;
         }
 
-        if (Disconnected is not null)
-            Disconnected(this, new SessionEventArgs(session));
+        try
+        {
+            if (Disconnected is not null)
+                Disconnected(this, new SessionEventArgs(session));
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError(ex, "Disconnected event failed");
+        }
 
         session.Dispose();
     }
@@ -339,6 +358,9 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 
                 if (channel.State != ChannelState.Opened) continue;
 
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Client connection accepted: {Channel}", channel);
+
                 var session = new Session(new QueueChannel(channel), this);
                 channel.BoundObject = session;
 
@@ -348,7 +370,12 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 OnConnected(session);
             }
 
-            cancellationToken.ThrowIfCancellationRequested();            
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Connection handling loop failed");
+            throw;
         }
         finally
         {

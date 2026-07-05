@@ -1,7 +1,11 @@
+using Microsoft.Extensions.Logging;
+
 namespace Sigurn.Rpc.Infrastructure;
 
 abstract class BaseAcceptor : IAsyncChannelAcceptor
 {
+    private static readonly ILogger<BaseAcceptor> _logger = RpcLogging.CreateLogger<BaseAcceptor>();
+
     private readonly Func<IChannel, IChannel>? _channelFactory = null;
 
     private volatile bool _isAccepting = false;
@@ -46,6 +50,11 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
             } while(!cancellationToken.IsCancellationRequested);
 
             return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Accept loop failed");
+            throw;
         }
         finally
         {

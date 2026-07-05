@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
@@ -8,6 +9,8 @@ namespace Sigurn.Rpc;
 sealed class Session : ISession, IDisposable, IAsyncDisposable
 {
     private static readonly AsyncLocal<ISession?> _session = new AsyncLocal<ISession?>();
+
+    private static readonly ILogger<Session> _logger = RpcLogging.CreateLogger<Session>();
 
     public static ISession? Current => _session.Value;
 
@@ -45,6 +48,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _host = null;
         _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+        _logger.LogInformation("Session created: {SessionId}", Id);
 
         InterfaceProxy.InstanceDestroyed += OnProxyDestroyed;
     }
@@ -55,6 +59,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _host = host;
         _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+        _logger.LogInformation("Session created: {SessionId}", Id);
     }
 
     internal Session(IChannel channel, IChannelHost host, IServiceHost serviceHost)
@@ -64,6 +69,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _serviceHost = serviceHost;
         _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+        _logger.LogInformation("Session created: {SessionId}", Id);
     }
 
     internal Session(IChannel channel, IServiceHost serviceHost)
@@ -73,6 +79,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _serviceHost = serviceHost;
         _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+        _logger.LogInformation("Session created: {SessionId}", Id);
     }
 
     public Guid Id { get; } = Guid.NewGuid();
@@ -107,6 +114,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        _logger.LogInformation("Session closed: {SessionId}", Id);
 
         RefCounter<ICallTarget>[] instances;
 
@@ -157,6 +166,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        _logger.LogInformation("Session closed: {SessionId}", Id);
 
         RefCounter<ICallTarget>[] instances;
 
@@ -357,6 +368,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 if (ec.Exclude is not null && ec.Exclude.Contains(this)) return;
             }
 
+            if (_logger.IsEnabled(LogLevel.Trace))
+                _logger.LogTrace("Sending event {EventId} for instance {InstanceId}", e.EventId, id);
+
             var packet = new EventDataPacket(id, e.EventId, e.Args);
             _handler.SendAsync(packet, CancellationToken.None).Wait();
         };
@@ -371,6 +385,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             instance.AddRef();
             instance.Value.EventTriggered += handler;
         }
+
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Instance registered: {InstanceId} ({InstanceType})", id, instance.Value.GetType().Name);
 
         if (instance.Value is ISessionsAware sas)
             sas.AttachSession(this);
@@ -416,8 +433,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         {
             adapter = counter.Value;
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
+            _logger.LogDebug(ex, "Adapter already disposed during cleanup");
             return;
         }
 
@@ -432,8 +450,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             {
                 sas.DetachSession(this);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "DetachSession failed during adapter cleanup");
             }
         }
     }
@@ -449,6 +468,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _adapters.Remove(instanceId);
             _adapterEventHandlers.Remove(instanceId, out handler);
         }
+
+        _logger.LogInformation("Instance released: {InstanceId}", instanceId);
 
         CleanupAdapter(instance, handler);
 
@@ -560,9 +581,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 }
                 else if (request is MethodCallPacket mcp)
                 {
+                    if (_logger.IsEnabled(LogLevel.Trace))
+                        _logger.LogTrace("Method call: instance {InstanceId} method {MethodId}", mcp.InstanceId, mcp.MethodId);
+
                     var instance = GetAdapter(mcp.InstanceId) ??
                         throw new Exception("Unknown instance");
-                    
+
                     var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken).ConfigureAwait(false);
                     return new MethodResultPacket(mcp)
                     {
@@ -623,6 +647,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            _logger.LogTrace(ex, "Request handling failed: {Request}", request);
             if (request is null) return null;
             if (request is MethodCallPacket mcp && mcp.OneWay) return null;
             return new ExceptionPacket(request, ex);

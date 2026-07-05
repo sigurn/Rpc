@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure;
 
 namespace Sigurn.Rpc;
@@ -7,6 +8,8 @@ namespace Sigurn.Rpc;
 /// </summary>
 public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 {
+    private static readonly ILogger<RestorableChannel> _logger = RpcLogging.CreateLogger<RestorableChannel>();
+
     private readonly Lock _lock = new ();
     private readonly IEnumerable<Func<CancellationToken, Task<IChannel>>> _channelFactories;
 
@@ -617,12 +620,15 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
                     RaiseOpened();
                     return;
                 }
-                catch(TaskCanceledException)
+                catch(TaskCanceledException ex)
                 {
+                    _logger.LogDebug(ex, "Channel reopening cancelled");
                     return;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.LogDebug(ex, "Channel reopening attempt failed; retrying after delay");
+
                     TimeSpan interval;
                     lock(_lock)
                     {
@@ -635,8 +641,9 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogDebug(ex, "Channel reopening loop failed");
             GoToFaultedState();
             return;
         }

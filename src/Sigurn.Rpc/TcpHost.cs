@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 
 namespace Sigurn.Rpc;
 
@@ -8,6 +9,8 @@ namespace Sigurn.Rpc;
 /// </summary>
 public class TcpHost : IDisposable, IChannelHost
 {
+    private static readonly ILogger<TcpHost> _logger = RpcLogging.CreateLogger<TcpHost>();
+
     private static IChannel DefaultChannelFactory(IChannel channel) => channel;
     private static IProtocol DefaultProtocolFactory() => new ChannelProtocol();
 
@@ -166,8 +169,9 @@ public class TcpHost : IDisposable, IChannelHost
                     _acceptTask = socket.AcceptAsync(cancellationToken).AsTask().ContinueWith(handler);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Accept handler failed");
                 socket.Close();
                 socket.Dispose();
             }

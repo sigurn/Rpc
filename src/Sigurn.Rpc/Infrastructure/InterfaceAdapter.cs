@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
 
@@ -6,6 +7,8 @@ namespace Sigurn.Rpc.Infrastructure;
 
 public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAware
 {
+    private static readonly ILogger<InterfaceAdapter> _logger = RpcLogging.CreateLogger<InterfaceAdapter>();
+
     private static readonly object _lock = new();
     private static Dictionary<Type, Func<object, InterfaceAdapter>> _factories = new();
 
@@ -284,9 +287,10 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
                 {
                     DetachEventHandlerAsync(eventId, CancellationToken.None).GetAwaiter().GetResult();
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Best effort: a faulting handler must not abort teardown.
+                    _logger.LogDebug(ex, "Detaching event {EventId} failed during session teardown", eventId);
                 }
             }
         }

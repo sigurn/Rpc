@@ -132,8 +132,9 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
                 _logger.LogTrace("Wait for opening task completion");
                 await task.ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Opening task failed while closing channel");
             }
         }
 
@@ -181,6 +182,8 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
                 _state = ChannelState.Closed;
 
             RaiseClosed();
+
+            _logger.LogInformation("Connection closed: {Channel}", this);
         }
         catch
         {
@@ -232,6 +235,8 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
             }
 
             RaiseOpened();
+
+            _logger.LogInformation("Connection established: {Channel}", this);
         }
         catch
         {
@@ -444,6 +449,9 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 
     protected void RaiseOpened()
     {
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace("Channel connected event: {Channel}", this);
+
         OnOpened();
 
         EventHandler? opened;
@@ -470,6 +478,9 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 
     protected void RaiseClosed()
     {
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace("Channel disconnected event: {Channel}", this);
+
         OnClosed();
 
         EventHandler? handler;
@@ -483,6 +494,9 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
 
     protected void RaiseFaulted()
     {
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace("Channel faulted event: {Channel}", this);
+
         OnFaulted();
 
         EventHandler? handler;

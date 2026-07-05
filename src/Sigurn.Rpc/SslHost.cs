@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Logging;
 
 namespace Sigurn.Rpc;
 
@@ -9,6 +10,8 @@ namespace Sigurn.Rpc;
 /// </summary>
 public class SslHost : IDisposable, IChannelHost
 {
+    private static readonly ILogger<SslHost> _logger = RpcLogging.CreateLogger<SslHost>();
+
     private static IChannel DefaultChannelFactory(IChannel channel) => channel;
     private static IProtocol DefaultProtocolFactory() => new ChannelProtocol();
 
@@ -204,8 +207,9 @@ public class SslHost : IDisposable, IChannelHost
                     _acceptTask = socket.AcceptAsync(cancellationToken).AsTask().ContinueWith(handler);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Accept handler failed");
                 socket.Close();
                 socket.Dispose();
             }

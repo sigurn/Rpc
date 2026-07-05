@@ -61,7 +61,7 @@ public class ServiceHost : IServiceHost
 
         _cts?.Cancel();
         try { _runTask?.Wait(); }
-        catch (AggregateException) { }
+        catch (AggregateException ex) { _logger.LogDebug(ex, "Run task faulted during service host stop"); }
 
         _cts?.Dispose();
         _cts = null;
@@ -124,12 +124,14 @@ public class ServiceHost : IServiceHost
             {
                 return await _queue.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                _logger.LogDebug(ex, "Accept cancelled");
                 return null;
             }
-            catch (ChannelClosedException)
+            catch (ChannelClosedException ex)
             {
+                _logger.LogDebug(ex, "Accept channel closed");
                 return null;
             }
         }

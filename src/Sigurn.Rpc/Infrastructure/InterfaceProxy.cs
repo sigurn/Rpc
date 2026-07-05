@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure.Packets;
 using Sigurn.Serialize;
 
@@ -5,6 +6,8 @@ namespace Sigurn.Rpc.Infrastructure;
 
 public class InterfaceProxy : IDisposable
 {
+    private static readonly ILogger<InterfaceProxy> _logger = RpcLogging.CreateLogger<InterfaceProxy>();
+
     private static readonly List<Action<Guid>> _handlers = new();
 
     internal static void NotifyAboutInstanceDestruction(Guid instanceId)
@@ -21,8 +24,9 @@ public class InterfaceProxy : IDisposable
                 {
                     handler(x);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.LogDebug(ex, "Instance destruction handler failed");
                     continue;
                 }
             }

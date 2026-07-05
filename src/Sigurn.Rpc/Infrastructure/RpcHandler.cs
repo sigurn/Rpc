@@ -219,6 +219,9 @@ class RpcHandler : IDisposable
 
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(Guid instanceId, int methodId, IReadOnlyList<byte[]> args, bool oneWay, CancellationToken cancellationToken)
     {
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace("Invoking remote method {MethodId} on {InstanceId}", methodId, instanceId);
+
         var request = new MethodCallPacket
         {
             InstanceId = instanceId,
@@ -315,9 +318,10 @@ class RpcHandler : IDisposable
             {
                 kvp.Value.Cancel();
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException ex)
             {
                 // The source may have already been disposed by the handling loop cleanup.
+                _logger.LogDebug(ex, "Cancellation source already disposed while cancelling pending request");
             }
         }
     }
@@ -343,9 +347,9 @@ class RpcHandler : IDisposable
             CancelPendingRequests();
             await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
-        catch(TimeoutException)
+        catch(TimeoutException ex)
         {
-
+            _logger.LogDebug(ex, "Timed out waiting for the packet handling loop to stop");
         }
         finally
         {
@@ -399,7 +403,10 @@ class RpcHandler : IDisposable
 
                         RpcPacket? answer = null;
                         if (t.IsFaulted)
+                        {
+                            _logger.LogTrace(t.Exception, "Method call handler faulted for request {RequestId}", request.RequestId);
                             answer = new ExceptionPacket(request, t.Exception);
+                        }
                         else if (t.IsCompletedSuccessfully)
                             answer = t.Result;
 
