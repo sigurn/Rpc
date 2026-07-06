@@ -160,23 +160,29 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
         return _session.CreateProxy<T>(cancellationToken);
     }
 
-    // Invoked by the restorable channel after the transport (re)connects but before Opened/restore. Builds
-    // the hook context, runs the user's hook, and releases every proxy the hook obtained — on success and
-    // on failure alike — before returning. Rethrows so a failing hook aborts the open (channel retries).
+    // Invoked by the restorable channel after the transport (re)connects but before Opened is raised. Runs
+    // the user's session-initialize hook (releasing every proxy it obtained, on success and failure alike),
+    // then re-establishes the session before returning. Because this whole callback is awaited ahead of
+    // Opened, the connection is announced only once instances and subscriptions have been restored, so app
+    // code reacting to Opened sees a ready session. A failing hook rethrows to abort the open (the channel
+    // retries) and, being before restore, keeps restore gated behind hook success.
     private async Task RunSessionInitializeAsync(IChannel channel, CancellationToken cancellationToken)
     {
         var handler = _sessionInitializeHandler;
-        if (handler is null) return;
+        if (handler is not null)
+        {
+            var context = new SessionInitializer(_session, channel);
+            try
+            {
+                await handler(context, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                context.ReleaseAll();
+            }
+        }
 
-        var context = new SessionInitializer(_session, channel);
-        try
-        {
-            await handler(context, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            context.ReleaseAll();
-        }
+        await _session.RestoreAfterReopenAsync(cancellationToken).ConfigureAwait(false);
     }
 
     // Session-initialize hook context. Proxies obtained via GetService are transient (never restorable) and

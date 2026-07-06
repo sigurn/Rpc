@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography.X509Certificates;
 using Sigurn.Rpc.Infrastructure;
 using Sigurn.Rpc.Infrastructure.Packets;
 
@@ -219,6 +221,81 @@ public class RestorableSessionTests
         tcpHost.Close();
     }
 
+    private static string SourceDir([CallerFilePath] string? path = null) => Path.GetDirectoryName(path) ?? string.Empty;
+
+    private static int FreeTcpPort()
+    {
+        using var l = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        l.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)l.LocalEndPoint!).Port;
+    }
+
+    [Fact(Timeout = 60000)]
+    public async Task Reopen_OverSsl_MethodCallsWorkAfterRestore()
+    {
+        var certificate = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine(SourceDir(), "sslhost.pfx"), null);
+        var endPoint = new IPEndPoint(IPAddress.Loopback, FreeTcpPort());
+        var dn = new X500DistinguishedName(certificate.Subject);
+        var serverName = certificate.GetNameInfo(X509NameType.SimpleName, false);
+
+        SslHost NewSslHost()
+        {
+            var h = new SslHost { EndPoint = endPoint, Certificate = certificate };
+            h.CertificateValidator = (s, c) => true;
+            return h;
+        }
+
+        DualProbe? probe = null;
+        var sslHost = NewSslHost();
+        var sh = new ServiceHost(sslHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.Session, () => new TestService(new List<string>()));
+        sh.RegisterSerive<IDualProbe>(ShareWithin.Session, () => probe = new DualProbe());
+        sh.Start();
+
+        await using var client = new RpcClient(async ct =>
+        {
+            var ch = new SslChannel(endPoint, (cert, chain) => cert is not null && cert.Subject == dn.Name)
+            {
+                ServerName = serverName,
+            };
+            await ch.OpenAsync(ct);
+            return ch;
+        })
+        {
+            AutoReopen = true,
+            ReopenInterval = TimeSpan.FromSeconds(1),
+        };
+
+        await client.OpenAsync(CurrentToken);
+        var service = await client.GetService<ITestService>(CurrentToken);
+        var dp = await client.GetService<IDualProbe>(CurrentToken);
+
+        int events = 0;
+        dp.First += (s, e) => Interlocked.Increment(ref events);
+        Assert.Equal(5, service.Add(2, 3));
+
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            sh.Stop();
+            Assert.True(WaitUntil(() => client.State == ChannelState.Faulted || client.State == ChannelState.Opening,
+                TimeSpan.FromSeconds(5)), $"Client never faulted after server stop (cycle {cycle})");
+            sh.Start();
+
+            Assert.True(WaitUntil(() => probe is not null && probe.FirstSubscribers == 1, TimeSpan.FromSeconds(20)),
+                $"Subscription not restored after SSL reopen (cycle {cycle})");
+
+            for (int i = 0; i < 10; i++)
+                Assert.True(WaitUntil(() =>
+                {
+                    try { return service.Add(i, 1) == i + 1; }
+                    catch (InvalidOperationException) { return false; }
+                }, TimeSpan.FromSeconds(10)), $"Method call {i} did not complete after SSL restore (cycle {cycle})");
+        }
+
+        sh.Stop();
+        sslHost.Close();
+    }
+
     [Fact(Timeout = 60000)]
     public async Task Reopen_MethodCallsWorkAfterInstanceAndSubscriptionRestore()
     {
@@ -304,6 +381,46 @@ public class RestorableSessionTests
 
         Volatile.Write(ref hammering, false);
         await hammer;
+
+        sh.Stop();
+        tcpHost.Close();
+    }
+
+    [Fact(Timeout = 20000)]
+    public async Task Opened_FiresOnlyAfterRestoreCompleted()
+    {
+        var tcpHost = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.Session, () => new TestService(new List<string>()));
+        sh.Start();
+
+        await using var client = NewClient(tcpHost);
+
+        // The application does its work strictly in the Opened handler. By contract, Opened must mean
+        // "session fully restored and ready", so a call issued here must succeed against the restored
+        // instance rather than race an unfinished restore (stale instance id -> failure).
+        ITestService? service = null;
+        Exception? reopenCallError = null;
+        var reopened = new ManualResetEventSlim(false);
+        int openCount = 0;
+        client.Opened += (s, e) =>
+        {
+            // Skip the first (primary) open; only assert on reconnects.
+            if (Interlocked.Increment(ref openCount) == 1) return;
+            try { Assert.Equal(9, service!.Add(4, 5)); }
+            catch (Exception ex) { reopenCallError = ex; }
+            finally { reopened.Set(); }
+        };
+
+        await client.OpenAsync(CurrentToken);
+        service = await client.GetService<ITestService>(CurrentToken);
+        Assert.Equal(5, service.Add(2, 3));
+
+        sh.Stop();
+        sh.Start();
+
+        Assert.True(reopened.Wait(TimeSpan.FromSeconds(15), CurrentToken), "Client did not reopen");
+        Assert.Null(reopenCallError);
 
         sh.Stop();
         tcpHost.Close();

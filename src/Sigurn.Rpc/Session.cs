@@ -35,9 +35,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     // get invalidated on reopen instead.
     private readonly Dictionary<Guid, ServiceInstance> _restorableInstances = [];
 
-    private readonly object _restoreLock = new();
     private int _openCount;
-    private Task _restoreTask = Task.CompletedTask;
 
     // The EventTriggered lambda this session wired onto each registered adapter, kept so
     // it can be removed on teardown — otherwise a shared (Host/Process) adapter keeps
@@ -61,9 +59,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         InterfaceProxy.InstanceDestroyed += OnProxyDestroyed;
 
-        // Client sessions restore their state when the restorable channel reconnects. Subscribed after
-        // the RpcHandler (created above), so the handler's receive-loop restart runs before restore.
-        _channel.Opened += OnChannelOpened;
+        // Client sessions restore their state when the restorable channel reconnects. Restore is driven by
+        // RpcClient through the channel's pre-Opened initialize slot (see RestoreAfterReopenAsync) rather
+        // than the Opened event, so the connection is announced as Opened only once restore has completed.
     }
 
     internal Session(IChannel channel, IChannelHost host)
@@ -130,10 +128,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         _logger.LogInformation("Session closed: {SessionId}", Id);
 
-        // Client sessions subscribe to these in their constructor; detach so the session (and
+        // Client sessions subscribe to this in their constructor; detach so the session (and
         // everything it roots) can be collected. A no-op for server sessions.
         InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
-        _channel.Opened -= OnChannelOpened;
 
         RefCounter<ICallTarget>[] instances;
 
@@ -198,10 +195,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         _logger.LogInformation("Session closed: {SessionId}", Id);
 
-        // Client sessions subscribe to these in their constructor; detach so the session (and
+        // Client sessions subscribe to this in their constructor; detach so the session (and
         // everything it roots) can be collected. A no-op for server sessions.
         InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
-        _channel.Opened -= OnChannelOpened;
 
         RefCounter<ICallTarget>[] instances;
 
@@ -717,24 +713,19 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
     }
 
-    private void OnChannelOpened(object? sender, EventArgs e)
+    // Re-establishes session state after the restorable channel reconnected to a brand-new remote session,
+    // and is awaited BEFORE the connection is announced as Opened so app code reacting to Opened sees a
+    // fully restored session (matching instance ids, replayed subscriptions). Invalidates proxies that
+    // cannot be restored, drops the callbacks exposed to the dead session, then re-requests the root
+    // service proxies and replays their event subscriptions. On the primary connect there is nothing to
+    // restore yet, so it is a no-op. Best-effort: it never throws, so a restore failure does not abort the
+    // open (the next reopen retries).
+    internal async Task RestoreAfterReopenAsync(CancellationToken cancellationToken)
     {
-        // The first open is the primary connection; only subsequent opens (reconnects) restore state.
+        // The primary connection is the first open; only reconnects restore state.
         if (Interlocked.Increment(ref _openCount) == 1) return;
         if (_isDisposed != 0) return;
 
-        lock (_restoreLock)
-        {
-            if (!_restoreTask.IsCompleted) return; // one restore at a time
-            _restoreTask = Task.Run(RestoreAsync);
-        }
-    }
-
-    // Re-establishes session state after the restorable channel reconnected to a brand-new remote
-    // session: invalidate proxies that cannot be restored, drop the callbacks exposed to the dead
-    // session, then re-request the root service proxies and replay their event subscriptions.
-    private async Task RestoreAsync()
-    {
         try
         {
             HashSet<Guid> restorableIds;
@@ -768,7 +759,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
             // 3. Re-request the root service proxies and replay their subscriptions. Best-effort:
             //    one failing instance must not abort the rest.
-            await Task.WhenAll(toRestore.Select(RestoreInstanceAsync)).ConfigureAwait(false);
+            await Task.WhenAll(toRestore.Select(i => RestoreInstanceAsync(i, cancellationToken))).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -776,11 +767,11 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task RestoreInstanceAsync(ServiceInstance instance)
+    private async Task RestoreInstanceAsync(ServiceInstance instance, CancellationToken cancellationToken)
     {
         try
         {
-            await instance.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+            await instance.RestoreAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
