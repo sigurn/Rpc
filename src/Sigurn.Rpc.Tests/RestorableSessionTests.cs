@@ -135,6 +135,90 @@ public class RestorableSessionTests
         ReopenInterval = TimeSpan.FromSeconds(1),
     };
 
+    // Same as NewClient but with a session-initialize hook wired through the constructor.
+    private static RpcClient NewClient(TcpHost host, Func<ISessionInitializer, CancellationToken, Task> hook) =>
+        new(hook, async ct =>
+        {
+            var ch = new TcpChannel(host.EndPoint);
+            await ch.OpenAsync(ct);
+            return ch;
+        })
+        {
+            AutoReopen = true,
+            ReopenInterval = TimeSpan.FromSeconds(1),
+        };
+
+    [Fact(Timeout = 30000)]
+    public async Task SessionInitializeHook_GatesRestore_MakesRpcCalls_AndReleasesTransientProxies()
+    {
+        CounterService.Live = 0;
+
+        var tcpHost = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.Session, () => new TestService(new List<string>()));
+        sh.RegisterSerive<ICounterService>(ShareWithin.None, () => new CounterService());
+        sh.Start();
+
+        int hookCalls = 0;
+        bool failHook = false;
+        int hookPing = 0;
+
+        await using var client = NewClient(tcpHost, async (ctx, ct) =>
+        {
+            Interlocked.Increment(ref hookCalls);
+            Assert.NotNull(ctx.Channel);                          // (a) channel access
+            var svc = await ctx.GetService<ICounterService>(ct);  // (b) full RPC: obtain a proxy...
+            Volatile.Write(ref hookPing, svc.Ping());             //     ...and call a method on it
+            if (Volatile.Read(ref failHook)) throw new InvalidOperationException("hook boom");
+        });
+
+        // Phase 1: the hook runs on the FIRST/primary connect, with a working RPC call.
+        await client.OpenAsync(CurrentToken);
+        Assert.Equal(1, Volatile.Read(ref hookCalls));
+        Assert.Equal(42, Volatile.Read(ref hookPing));
+        // The transient proxy obtained in the hook is released once the hook returns -> the server-side
+        // ShareWithin.None instance is disposed. Nothing keeps it alive across the hook boundary.
+        Assert.True(WaitUntil(() => CounterService.Live == 0, TimeSpan.FromSeconds(5)),
+            "Transient hook proxy was not released after the initial hook");
+
+        var service = await client.GetService<ITestService>(CurrentToken);
+        Assert.Equal(5, service.Add(2, 3));
+
+        // Phase 2: the hook FAILS on reconnect -> restore must be gated, the root proxy must not recover,
+        // and the reopen must keep retrying (calling the hook again each attempt).
+        Volatile.Write(ref failHook, true);
+        var callsBefore = Volatile.Read(ref hookCalls);
+        sh.Stop();
+        sh.Start();
+
+        Assert.True(WaitUntil(() => Volatile.Read(ref hookCalls) >= callsBefore + 2, TimeSpan.FromSeconds(15)),
+            "Hook was not retried across repeated failed reopens");
+        Assert.False(WaitUntil(() =>
+        {
+            try { return service.Add(4, 5) == 9; }
+            catch { return false; }
+        }, TimeSpan.FromSeconds(3)), "Restore ran even though the hook was failing");
+        // Proxies acquired by a failing hook are released each attempt, so they never accumulate: at most one
+        // (the in-flight attempt) is alive at any instant despite many failed reconnects.
+        Assert.True(CounterService.Live <= 1, $"Failing-hook transient proxies accumulated: {CounterService.Live}");
+
+        // Phase 3: let the hook succeed -> restore runs and the SAME proxy recovers (hook-before-restore),
+        // and restore never re-requests the transient service.
+        Volatile.Write(ref failHook, false);
+        Assert.True(WaitUntil(() =>
+        {
+            try { return service.Add(4, 5) == 9; }
+            catch { return false; }
+        }, TimeSpan.FromSeconds(15)), "Root proxy did not recover after the hook started succeeding");
+        // Once quiescent, the last successful hook has released its transient proxy and restore only
+        // re-requested the restorable ITestService — never the transient ICounterService.
+        Assert.True(WaitUntil(() => CounterService.Live == 0, TimeSpan.FromSeconds(5)),
+            "Transient hook proxies were not all released after recovery");
+
+        sh.Stop();
+        tcpHost.Close();
+    }
+
     [Fact(Timeout = 20000)]
     public async Task Reopen_RestoresMethodCalls()
     {

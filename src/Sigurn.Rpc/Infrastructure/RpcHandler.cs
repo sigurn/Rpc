@@ -46,7 +46,13 @@ class RpcHandler : IDisposable
         _channel = channel;
         _handler = handler;
 
-        _channel.Opened += OnChannelOpened;
+        // Resume the receive loop as soon as the transport is live for RPC. A restorable channel signals
+        // that via Connected (raised before its session-initialize hook and before the public Opened), so
+        // the hook can make RPC calls. Plain channels have no such split and use Opened, unchanged.
+        if (_channel is IConnectNotifyingChannel cnc)
+            cnc.Connected += OnChannelConnected;
+        else
+            _channel.Opened += OnChannelConnected;
         _channel.Closed += OnChannelClosed;
         _channel.Faulted += OnChannelFaulted;
 
@@ -296,7 +302,7 @@ class RpcHandler : IDisposable
         await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
     }
 
-    private void OnChannelOpened(object? sender, EventArgs args)
+    private void OnChannelConnected(object? sender, EventArgs args)
     {
         lock (_lock)
         {
@@ -498,15 +504,27 @@ class RpcHandler : IDisposable
         EventHandler handler = (s, e) => tcs.TrySetResult(true);
         using var registration = cancellationToken.Register(() => tcs.TrySetCanceled(), false);
 
+        // Wake as soon as the transport is live for RPC. On a restorable channel that is Connected (raised
+        // before its session-initialize hook), not Opened (raised after). State is set to Opened before
+        // either event, so the post-subscribe re-check below still closes the missed-wakeup window.
+        var connectNotifying = channel as IConnectNotifyingChannel;
+
         try
         {
-            channel.Opened += handler;
+            if (connectNotifying is not null)
+                connectNotifying.Connected += handler;
+            else
+                channel.Opened += handler;
+
             if (channel.State == ChannelState.Opened) tcs.TrySetResult(true);
             return await tcs.Task.ConfigureAwait(false);
         }
         finally
         {
-            channel.Opened -= handler;
+            if (connectNotifying is not null)
+                connectNotifying.Connected -= handler;
+            else
+                channel.Opened -= handler;
         }
     }
 

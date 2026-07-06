@@ -6,7 +6,7 @@ namespace Sigurn.Rpc;
 /// <summary>
 /// Implements <see cref="IChannel"/> with automatic reconnection support using a sequence of channel factories.
 /// </summary>
-public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
+public class RestorableChannel : IChainedChannel, IConnectNotifyingChannel, IDisposable, IAsyncDisposable
 {
     private static readonly ILogger<RestorableChannel> _logger = RpcLogging.CreateLogger<RestorableChannel>();
 
@@ -261,6 +261,8 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 
             await CleanupChannelAsync(oldChannel).ConfigureAwait(false);
 
+            await ConnectAndInitializeAsync(channel, cancellationToken).ConfigureAwait(false);
+
             RaiseOpened();
         }
         catch
@@ -416,6 +418,34 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
         }
     }
 
+    private EventHandler? _connected;
+    /// <summary>
+    /// Occurs when the transport is live and RPC traffic can flow, ahead of <see cref="Opened"/>.
+    /// Used by the RPC receive loop to resume before the session-initialize hook runs.
+    /// </summary>
+    public event EventHandler Connected
+    {
+        add
+        {
+            lock(_lock)
+                _connected += value;
+        }
+
+        remove
+        {
+            lock(_lock)
+                _connected -= value;
+        }
+    }
+
+    /// <summary>
+    /// A hook awaited after the transport (re)connects but before <see cref="Opened"/> is raised. It runs
+    /// with the receive loop already pumping (see <see cref="Connected"/>), so it can perform RPC calls.
+    /// If it throws, the open is treated as a failed connect: <see cref="Opened"/> is not raised and the
+    /// reopen loop retries. The freshly connected channel is passed as the argument.
+    /// </summary>
+    internal Func<IChannel, CancellationToken, Task>? SessionInitializeAsync { get; set; }
+
     private EventHandler? _opened;
     /// <summary>
     /// Occures when the channel is opened.
@@ -508,10 +538,52 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
             opening(this, EventArgs.Empty);
     }
 
+    // Called once the new channel has been swapped in and State==Opened: resume the RPC receive loop via
+    // Connected (so RPC can flow), then await the session-initialize hook. On hook failure the just
+    // connected channel is torn down and the state reverted to Opening so the caller treats it as a failed
+    // open — OpenAsync faults and rethrows, ReopenChannelAsync delays and retries. On success the caller
+    // raises Opened next.
+    private async Task ConnectAndInitializeAsync(IChannel channel, CancellationToken cancellationToken)
+    {
+        RaiseConnected();
+
+        var hook = SessionInitializeAsync;
+        if (hook is null) return;
+
+        try
+        {
+            await hook(channel, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            IChannel? faultedChannel;
+            lock(_lock)
+            {
+                faultedChannel = _channel;
+                _channel = null;
+                _state = ChannelState.Opening;
+            }
+
+            await CleanupChannelAsync(faultedChannel).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    protected void RaiseConnected()
+    {
+        EventHandler? connected;
+
+        lock(_lock)
+            connected = _connected;
+
+        if (connected is not null)
+            connected(this, EventArgs.Empty);
+    }
+
     protected void RaiseOpened()
     {
         EventHandler? opened;
-        
+
         lock(_lock)
             opened = _opened;
 
@@ -672,6 +744,8 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
                     }
 
                     await CleanupChannelAsync(oldChannel).ConfigureAwait(false);
+
+                    await ConnectAndInitializeAsync(channel, cancellationToken).ConfigureAwait(false);
 
                     RaiseOpened();
                     return;

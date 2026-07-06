@@ -336,10 +336,16 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
     internal RpcHandler Rpc => _handler;
 
-    internal async Task<T> CreateProxy<T>(CancellationToken cancellationToken)
+    internal Task<T> CreateProxy<T>(CancellationToken cancellationToken)
+        => CreateProxy<T>(cancellationToken, restorable: true);
+
+    // restorable:false yields a transient proxy that is not tracked in _restorableInstances, so session
+    // restore never re-requests it. Used by the session-initialize hook, which releases such proxies when
+    // it completes.
+    internal async Task<T> CreateProxy<T>(CancellationToken cancellationToken, bool restorable)
     {
         var instanceId = await _handler.GetServiceInstanceAsync(typeof(T).GUID, cancellationToken).ConfigureAwait(false);
-        return (T)GetProxy(typeof(T), instanceId, restorable: true);
+        return (T)GetProxy(typeof(T), instanceId, restorable);
     }
 
     private void CheckDisposed()
@@ -388,7 +394,18 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 _logger.LogTrace("Sending event {EventId} for instance {InstanceId}", e.EventId, id);
 
             var packet = new EventDataPacket(id, e.EventId, e.Args);
-            _handler.SendAsync(packet, CancellationToken.None).Wait();
+
+            // Event delivery is fire-and-forget: a service raising an event must never fault because this
+            // session's channel is momentarily down (e.g. between reopens). Drop the event and log — the
+            // client replays its subscriptions on reopen, so a lost notification during the gap is expected.
+            try
+            {
+                _handler.SendAsync(packet, CancellationToken.None).Wait();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Dropped event {EventId} for instance {InstanceId}: channel unavailable", e.EventId, id);
+            }
         };
 
         lock (_adapters)

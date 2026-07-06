@@ -14,16 +14,35 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
 
     private readonly Session _session;
 
+    private readonly Func<ISessionInitializer, CancellationToken, Task>? _sessionInitializeHandler;
+
     /// <summary>
     /// Initializes a new instance of <see cref="RpcClient"/> with the specified channel factories.
     /// </summary>
     /// <param name="channelFactories">The ordered sequence of channel factories tried during connection and reconnection.</param>
     public RpcClient(params Func<CancellationToken, Task<IChannel>>[] channelFactories)
+        : this(null, channelFactories)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="RpcClient"/> with a session-initialize hook and the specified channel factories.
+    /// </summary>
+    /// <param name="sessionInitializeHandler">
+    /// A hook invoked after the transport (re)connects but before session state is restored and before the
+    /// connection is announced as ready. It runs on every (re)open with full RPC available (see
+    /// <see cref="ISessionInitializer"/>); if it throws, the open is treated as a failed connect and retried.
+    /// Pass <see langword="null"/> (e.g. for TLS/cert flows) to skip it.
+    /// </param>
+    /// <param name="channelFactories">The ordered sequence of channel factories tried during connection and reconnection.</param>
+    public RpcClient(Func<ISessionInitializer, CancellationToken, Task>? sessionInitializeHandler, params Func<CancellationToken, Task<IChannel>>[] channelFactories)
     {
         ArgumentNullException.ThrowIfNull(channelFactories);
 
+        _sessionInitializeHandler = sessionInitializeHandler;
         _channel = new RestorableChannel(channelFactories);
         _session = new Session(_channel);
+        _channel.SessionInitializeAsync = RunSessionInitializeAsync;
     }
 
     /// <summary>
@@ -139,6 +158,66 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
     public Task<T> GetService<T>(CancellationToken cancellationToken) where T : class
     {
         return _session.CreateProxy<T>(cancellationToken);
+    }
+
+    // Invoked by the restorable channel after the transport (re)connects but before Opened/restore. Builds
+    // the hook context, runs the user's hook, and releases every proxy the hook obtained — on success and
+    // on failure alike — before returning. Rethrows so a failing hook aborts the open (channel retries).
+    private async Task RunSessionInitializeAsync(IChannel channel, CancellationToken cancellationToken)
+    {
+        var handler = _sessionInitializeHandler;
+        if (handler is null) return;
+
+        var context = new SessionInitializer(_session, channel);
+        try
+        {
+            await handler(context, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            context.ReleaseAll();
+        }
+    }
+
+    // Session-initialize hook context. Proxies obtained via GetService are transient (never restorable) and
+    // tracked so they can be released when the hook finishes.
+    private sealed class SessionInitializer : ISessionInitializer
+    {
+        private readonly Session _session;
+        private readonly List<IDisposable> _acquired = [];
+
+        public SessionInitializer(Session session, IChannel channel)
+        {
+            _session = session;
+            Channel = channel;
+        }
+
+        public IChannel Channel { get; }
+
+        public async Task<T> GetService<T>(CancellationToken cancellationToken) where T : class
+        {
+            var proxy = await _session.CreateProxy<T>(cancellationToken, restorable: false).ConfigureAwait(false);
+            if (proxy is IDisposable disposable)
+                lock (_acquired)
+                    _acquired.Add(disposable);
+            return proxy;
+        }
+
+        public void ReleaseAll()
+        {
+            IDisposable[] items;
+            lock (_acquired)
+            {
+                items = [.. _acquired];
+                _acquired.Clear();
+            }
+
+            foreach (var disposable in items)
+            {
+                try { disposable.Dispose(); }
+                catch { /* best effort: releasing a transient hook proxy must not abort the open */ }
+            }
+        }
     }
 
     /// <summary>
