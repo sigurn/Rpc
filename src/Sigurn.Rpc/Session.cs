@@ -117,6 +117,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         _logger.LogInformation("Session closed: {SessionId}", Id);
 
+        // Client sessions subscribe to this static event in their constructor; detach so the
+        // session (and everything it roots) can be collected. A no-op for server sessions.
+        InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
+
         RefCounter<ICallTarget>[] instances;
 
         lock (_proxies)
@@ -168,6 +172,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
 
         _logger.LogInformation("Session closed: {SessionId}", Id);
+
+        // Client sessions subscribe to this static event in their constructor; detach so the
+        // session (and everything it roots) can be collected. A no-op for server sessions.
+        InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
 
         RefCounter<ICallTarget>[] instances;
 

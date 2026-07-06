@@ -260,13 +260,26 @@ public class ProcessChannel : BaseChannel
         if (process is null)
             throw new Exception($"Failed to start process {_processInfo.FileName}");
 
-        process.Exited += OnProcessExited;
-
-        lock(_lock)
+        try
         {
-            _process = process;
-            _inputStream = process.StandardInput.BaseStream; //for writing
-            _outputStream = process.StandardOutput.BaseStream; //for reading
+            process.EnableRaisingEvents = true;
+            process.Exited += OnProcessExited;
+
+            lock(_lock)
+            {
+                _process = process;
+                _inputStream = process.StandardInput.BaseStream; //for writing
+                _outputStream = process.StandardOutput.BaseStream; //for reading
+            }
+        }
+        catch
+        {
+            // Failed to wire up the freshly started child process — kill and release it
+            // instead of leaking the running OS process.
+            try { if (!process.HasExited) process.Kill(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill process during open cleanup"); }
+            process.Dispose();
+            throw;
         }
 
         return Task.CompletedTask;

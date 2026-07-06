@@ -96,6 +96,42 @@ public class SslHostTests
         Assert.Equal(["Connected", "Disconnected"], eventHistory);
     }
 
+    [Fact(Timeout = 15000)]
+    public async Task ClientHandshakeFailure_DisposesSocket()
+    {
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen();
+        var endPoint = (IPEndPoint)listener.LocalEndPoint!;
+
+        // Broken "server": accept, read the ClientHello, answer with garbage (not a ServerHello),
+        // then observe whether the client closes its TCP socket after the handshake fails.
+        var serverTask = Task.Run(async () =>
+        {
+            using var serverSocket = await listener.AcceptAsync();
+            var buffer = new byte[4096];
+            await serverSocket.ReceiveAsync(buffer, SocketFlags.None);
+            await serverSocket.SendAsync(new byte[] { 0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28 }, SocketFlags.None);
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            try
+            {
+                // 0 => the client closed its socket (fixed); cancellation => the socket leaked (still open).
+                return await serverSocket.ReceiveAsync(buffer, SocketFlags.None, timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return -1;
+            }
+        });
+
+        var client = new SslChannel(endPoint, (cert, chain) => true) { ServerName = "localhost" };
+        await Assert.ThrowsAnyAsync<Exception>(() => client.OpenAsync(CancellationToken.None));
+
+        var observed = await serverTask;
+        Assert.Equal(0, observed);
+    }
+
     private static string GetSourceDirectory([CallerFilePath] string? path = null)
     {
         return Path.GetDirectoryName(path) ?? string.Empty;

@@ -40,6 +40,7 @@ public sealed class RpcClient : IDisposable, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await CloseAsync(CancellationToken.None).ConfigureAwait(false);
+        await _session.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>

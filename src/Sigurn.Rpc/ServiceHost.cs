@@ -46,7 +46,20 @@ public class ServiceHost : IServiceHost
 
         _cts = new CancellationTokenSource();
         _runTask = _inner.RunAsync(_cts.Token);
-        _host.Open();
+        try
+        {
+            _host.Open();
+        }
+        catch
+        {
+            _cts.Cancel();
+            try { _runTask.Wait(TimeSpan.FromSeconds(5)); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Run task faulted after failed host open"); }
+            _cts.Dispose();
+            _cts = null;
+            _runTask = null;
+            throw;
+        }
     }
 
     /// <summary>

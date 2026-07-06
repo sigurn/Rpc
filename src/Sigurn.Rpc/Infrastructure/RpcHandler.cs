@@ -397,7 +397,14 @@ class RpcHandler : IDisposable
                 }
 
                 var requestCancellationToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                _cancellationSources.TryAdd(request.RequestId, requestCancellationToken);
+                if (!_cancellationSources.TryAdd(request.RequestId, requestCancellationToken))
+                {
+                    // A request with the same id is already in flight — drop this duplicate and
+                    // release the just-created source instead of leaking it.
+                    requestCancellationToken.Dispose();
+                    _logger.LogDebug("Duplicate request id {RequestId}; dropping packet", request.RequestId);
+                    continue;
+                }
 
                 var task = Task.Run(() => HandlePacket(request, requestCancellationToken.Token))
                     .ContinueWith(async t =>

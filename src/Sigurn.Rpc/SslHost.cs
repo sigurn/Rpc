@@ -215,12 +215,21 @@ public class SslHost : IDisposable, IChannelHost
             }
         };
 
-        socket.Bind(endPoint);
-        socket.Listen();
-        lock(_lock)
+        try
         {
-            _listeningEndPoint = (IPEndPoint?)socket.LocalEndPoint;
-            _acceptTask = socket.AcceptAsync(cancellationToken).AsTask().ContinueWith(handler);
+            socket.Bind(endPoint);
+            socket.Listen();
+            lock(_lock)
+            {
+                _listeningEndPoint = (IPEndPoint?)socket.LocalEndPoint;
+                _acceptTask = socket.AcceptAsync(cancellationToken).AsTask().ContinueWith(handler);
+            }
+        }
+        catch
+        {
+            socket.Dispose();
+            lock(_lock) IsOpened = false;
+            throw;
         }
     }
 

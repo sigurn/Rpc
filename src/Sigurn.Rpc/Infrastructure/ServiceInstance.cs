@@ -21,8 +21,14 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _handler.ReleaseServiceInstanceAsync(InstanceId, CancellationToken.None).ConfigureAwait(false);
-        _removeHandler.Dispose();
+        try
+        {
+            await _handler.ReleaseServiceInstanceAsync(InstanceId, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _removeHandler.Dispose();
+        }
     }
 
     public Guid InstanceId { get; }

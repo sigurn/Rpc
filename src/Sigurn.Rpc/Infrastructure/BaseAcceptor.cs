@@ -34,19 +34,24 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
                 var channel = await Accept(cancellationToken).ConfigureAwait(false);
                 if (channel is null) return null;
 
-                var validator = Interlocked.Exchange(ref _validator, _validator);
-                if (validator is not null && !await validator(channel, cancellationToken).ConfigureAwait(false))
+                try
                 {
-                    if (channel is IAsyncDisposable ad)
-                        await ad.DisposeAsync().ConfigureAwait(false);
-                    else if (channel is IDisposable d)
-                        d.Dispose();
+                    var validator = Interlocked.Exchange(ref _validator, _validator);
+                    if (validator is not null && !await validator(channel, cancellationToken).ConfigureAwait(false))
+                    {
+                        await DisposeChannelAsync(channel).ConfigureAwait(false);
+                        continue;
+                    }
 
-                    continue;
+                    return _channelFactory != null ?
+                        _channelFactory(channel) : channel;
                 }
-
-                return _channelFactory != null ?
-                    _channelFactory(channel) : channel;
+                catch
+                {
+                    // Validator or channel factory threw — release the accepted channel (and its socket).
+                    await DisposeChannelAsync(channel).ConfigureAwait(false);
+                    throw;
+                }
             } while(!cancellationToken.IsCancellationRequested);
 
             return null;
@@ -60,6 +65,14 @@ abstract class BaseAcceptor : IAsyncChannelAcceptor
         {
             Interlocked.Exchange(ref _isAccepting, false);
         }
+    }
+
+    private static async Task DisposeChannelAsync(IChannel channel)
+    {
+        if (channel is IAsyncDisposable ad)
+            await ad.DisposeAsync().ConfigureAwait(false);
+        else if (channel is IDisposable d)
+            d.Dispose();
     }
 
     public Func<IChannel, CancellationToken, Task<bool>>? SetChannelValidator(Func<IChannel, CancellationToken, Task<bool>>? validator)

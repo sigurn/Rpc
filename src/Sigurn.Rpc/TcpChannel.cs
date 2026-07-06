@@ -98,11 +98,18 @@ public class TcpChannel : BaseChannel, IAddressableChannel
     protected override async Task InternalOpenAsync(CancellationToken cancellationToken)
     {
         var socket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        try
+        {
+            await socket.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
-        await socket.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
-
-        lock (_lock)
-            _socket = socket;
+            lock (_lock)
+                _socket = socket;
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     protected override Task InternalCloseAsync(CancellationToken cancellationToken)

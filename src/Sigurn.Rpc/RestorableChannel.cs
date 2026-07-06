@@ -51,12 +51,51 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     public async ValueTask DisposeAsync()
     {
+        await CloseAsync(CancellationToken.None).ConfigureAwait(false);
+
+        lock (_lock)
+        {
+            _cancellationSource?.Dispose();
+            _cancellationSource = null;
+            _openCancellationSource?.Dispose();
+            _openCancellationSource = null;
+        }
+
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    // Detaches this channel's fault/close handlers from an underlying channel and releases it.
+    private void DetachHandlers(IChannel channel)
+    {
+        if (channel is IChainedChannel chained && chained.BaseChannel is IChannel inner)
+        {
+            inner.Faulted -= ChannelFaultedHandler;
+            inner.Closed -= ChannelClosedHandler;
+        }
+    }
+
+    private async Task CleanupChannelAsync(IChannel? channel)
+    {
+        if (channel is null) return;
+
+        DetachHandlers(channel);
+
+        try
+        {
+            await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to close the previous channel while swapping");
+        }
+
+        if (channel is IDisposable d) d.Dispose();
     }
 
     private bool _autoReopen = true;
@@ -206,16 +245,21 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
             startEvent.Set();
             var channel = await task.ConfigureAwait(false);
 
+            IChannel? oldChannel;
             lock(_lock)
             {
                 _openTask = null;
                 _openCancellationSource?.Dispose();
                 _openCancellationSource = null;
 
+                oldChannel = _channel;
                 _channel = new QueueChannel(channel);
+                _cancellationSource?.Dispose();
                 _cancellationSource = new CancellationTokenSource();
                 _state = ChannelState.Opened;
             }
+
+            await CleanupChannelAsync(oldChannel).ConfigureAwait(false);
 
             RaiseOpened();
         }
@@ -289,6 +333,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
 
             if (channel is not null)
             {
+                DetachHandlers(channel);
                 await channel.CloseAsync(cancellationToken).ConfigureAwait(false);
                 if (channel is IDisposable d) d.Dispose();
                 channel = null;
@@ -303,6 +348,10 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
         {
             GoToFaultedState();
             throw;
+        }
+        finally
+        {
+            cancellationTokenSource?.Dispose();
         }
     }
 
@@ -613,11 +662,15 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
                 {
                     var channel = await ConnectToServerAsync(factories, cancellationToken).ConfigureAwait(false);
 
+                    IChannel? oldChannel;
                     lock(_lock)
                     {
                         _factories = factories;
+                        oldChannel = _channel;
                         _channel = new QueueChannel(channel);
                     }
+
+                    await CleanupChannelAsync(oldChannel).ConfigureAwait(false);
 
                     RaiseOpened();
                     return;

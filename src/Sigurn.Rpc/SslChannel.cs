@@ -208,27 +208,36 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
     protected override async Task InternalOpenAsync(CancellationToken cancellationToken)
     {
         var socket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-
-        await socket.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
-
-        var sslStream = new SslStream(new NetworkStream(socket), false, ValidateRemoteCertificate);
-
-        SslClientAuthenticationOptions authOptions = new SslClientAuthenticationOptions
+        SslStream? sslStream = null;
+        try
         {
-            EnabledSslProtocols = SslProtocols.Tls13 | SslProtocols.Tls12,
-            TargetHost = ServerName,
-            RemoteCertificateValidationCallback = ValidateRemoteCertificate
-        };
+            await socket.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
-        if (_certificate is not null)
-            authOptions.ClientCertificates = new X509CertificateCollection(new X509Certificate[] { _certificate });
+            sslStream = new SslStream(new NetworkStream(socket), false, ValidateRemoteCertificate);
 
-        await sslStream.AuthenticateAsClientAsync(authOptions, cancellationToken).ConfigureAwait(false);
+            SslClientAuthenticationOptions authOptions = new SslClientAuthenticationOptions
+            {
+                EnabledSslProtocols = SslProtocols.Tls13 | SslProtocols.Tls12,
+                TargetHost = ServerName,
+                RemoteCertificateValidationCallback = ValidateRemoteCertificate
+            };
 
-        lock (_lock)
+            if (_certificate is not null)
+                authOptions.ClientCertificates = new X509CertificateCollection(new X509Certificate[] { _certificate });
+
+            await sslStream.AuthenticateAsClientAsync(authOptions, cancellationToken).ConfigureAwait(false);
+
+            lock (_lock)
+            {
+                _socket = socket;
+                _sslStream = sslStream;
+            }
+        }
+        catch
         {
-            _socket = socket;
-            _sslStream = sslStream;
+            sslStream?.Dispose();   // flushes the TLS alert and closes the NetworkStream
+            socket.Dispose();       // closes the TCP socket (NetworkStream was created with ownsSocket=false)
+            throw;
         }
     }
 
