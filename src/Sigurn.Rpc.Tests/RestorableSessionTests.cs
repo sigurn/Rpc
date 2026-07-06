@@ -385,6 +385,65 @@ public class RestorableSessionTests
     }
 
     [Fact(Timeout = 20000)]
+    public async Task Reopen_InvalidatesRootProxy_WhenServiceNoLongerRegistered()
+    {
+        // Server 1 offers both services. The client keeps a root proxy for each.
+        var host1 = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh1 = new ServiceHost(host1);
+        sh1.RegisterSerive<ITestService>(ShareWithin.Session, () => new TestService(new List<string>()));
+        sh1.RegisterSerive<ICounterService>(ShareWithin.Session, () => new CounterService());
+        sh1.Start();
+
+        // The reconnect target is redirectable, so we can point the client at a different server after
+        // the fault (host.EndPoint is read inside the factory, which follows the current target).
+        var target = new TcpHost[] { host1 };
+        await using var client = new RpcClient(async ct =>
+        {
+            var ch = new TcpChannel(target[0].EndPoint);
+            await ch.OpenAsync(ct);
+            return ch;
+        })
+        {
+            AutoReopen = true,
+            ReopenInterval = TimeSpan.FromSeconds(1),
+        };
+
+        await client.OpenAsync(CurrentToken);
+        var service = await client.GetService<ITestService>(CurrentToken);
+        var counter = await client.GetService<ICounterService>(CurrentToken);
+
+        Assert.Equal(5, service.Add(2, 3));
+        Assert.Equal(42, counter.Ping());
+        Assert.True(RpcInterface.IsValid(counter));
+
+        // Fault server 1, then bring up server 2 that no longer offers ICounterService, and redirect the
+        // client to it.
+        sh1.Stop();
+        host1.Close();
+
+        var host2 = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh2 = new ServiceHost(host2);
+        sh2.RegisterSerive<ITestService>(ShareWithin.Session, () => new TestService(new List<string>()));
+        sh2.Start();
+        Volatile.Write(ref target[0], host2);
+
+        // The surviving service recovers — this proves the reopen/restore has run.
+        Assert.True(WaitUntil(() =>
+        {
+            try { return service.Add(4, 5) == 9; }
+            catch { return false; }
+        }, TimeSpan.FromSeconds(10)), "Surviving root proxy did not recover after reopen");
+
+        // The missing service's proxy cannot be restored — it must fail fast with a clear exception
+        // instead of hitting the new server with a stale instance id.
+        Assert.False(RpcInterface.IsValid(counter));
+        Assert.Throws<RpcInvalidInstanceException>(() => counter.Ping());
+
+        sh2.Stop();
+        host2.Close();
+    }
+
+    [Fact(Timeout = 20000)]
     public async Task IsValid_ReflectsProxyState()
     {
         Assert.False(RpcInterface.IsValid("not a proxy"));

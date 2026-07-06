@@ -70,7 +70,20 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
     // subscriptions in a single batch round-trip.
     internal async Task RestoreAsync(CancellationToken cancellationToken)
     {
-        var newId = await _handler.GetServiceInstanceAsync(InterfaceType.GUID, cancellationToken).ConfigureAwait(false);
+        Guid newId;
+        try
+        {
+            newId = await _handler.GetServiceInstanceAsync(InterfaceType.GUID, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The service is no longer available on the new remote session (e.g. it is not registered
+            // there anymore) or could not be re-acquired. Invalidate so subsequent calls fail fast with
+            // RpcInvalidInstanceException instead of hitting the server with a stale instance id. A later
+            // reopen re-attempts restoration and revalidates if the service comes back.
+            Invalidate();
+            throw;
+        }
 
         int[] eventIds;
         lock (_lock)
