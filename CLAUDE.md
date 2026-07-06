@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+Always use TDD. For any bug fix or new feature, write a failing test first, then implement the code
+until it passes. Do not write production code before there is a test that fails for the right reason.
+
 ## Build & Test Commands
 
 ```bash

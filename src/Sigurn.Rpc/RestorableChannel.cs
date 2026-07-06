@@ -668,6 +668,7 @@ public class RestorableChannel : IChainedChannel, IDisposable, IAsyncDisposable
                         _factories = factories;
                         oldChannel = _channel;
                         _channel = new QueueChannel(channel);
+                        _state = ChannelState.Opened;
                     }
 
                     await CleanupChannelAsync(oldChannel).ConfigureAwait(false);

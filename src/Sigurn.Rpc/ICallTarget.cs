@@ -70,6 +70,19 @@ public interface ICallTarget
     Task AttachEventHandlerAsync(int eventId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Subscribes to several remote events of this instance in one operation.
+    /// The default implementation loops over <see cref="AttachEventHandlerAsync"/>, preserving any
+    /// per-session subscription bookkeeping the implementation performs there.
+    /// </summary>
+    /// <param name="eventIds">The identifiers of the events to subscribe to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    async Task AttachEventHandlersAsync(IReadOnlyList<int> eventIds, CancellationToken cancellationToken)
+    {
+        foreach (var eventId in eventIds)
+            await AttachEventHandlerAsync(eventId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Unsubscribes from a remote event asynchronously.
     /// </summary>
     /// <param name="eventId">The identifier of the event.</param>

@@ -47,6 +47,7 @@ abstract class RpcPacket
         UnsubscribeFromEvent,
         EventDataPacket,
         CancelRequest,
+        SubscribeForEvents,
     }
 
     internal static SerializationContext DefaultSerializationContext = SerializationContext.Default with
@@ -141,6 +142,10 @@ abstract class RpcPacket
 
                 case PacketType.SubscribeForEvent:
                     package = new SubscribeForEventPacket();
+                    break;
+
+                case PacketType.SubscribeForEvents:
+                    package = new SubscribeForEventsPacket();
                     break;
 
                 case PacketType.UnsubscribeFromEvent:

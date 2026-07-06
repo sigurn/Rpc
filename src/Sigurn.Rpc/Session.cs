@@ -30,6 +30,15 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     private readonly Dictionary<Guid, RefCounter<ICallTarget>> _adapters = [];
     private readonly Dictionary<Guid, RefCounter<ICallTarget>> _proxies = [];
 
+    // Root service proxies (obtained via CreateProxy<T>) that can be re-established after a channel
+    // reopen, keyed by their original (stable) instance id. Derived proxies are not tracked here and
+    // get invalidated on reopen instead.
+    private readonly Dictionary<Guid, ServiceInstance> _restorableInstances = [];
+
+    private readonly object _restoreLock = new();
+    private int _openCount;
+    private Task _restoreTask = Task.CompletedTask;
+
     // The EventTriggered lambda this session wired onto each registered adapter, kept so
     // it can be removed on teardown — otherwise a shared (Host/Process) adapter keeps
     // pushing events to this session's closed channel. Guarded by the _adapters lock.
@@ -51,6 +60,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _logger.LogInformation("Session created: {SessionId}", Id);
 
         InterfaceProxy.InstanceDestroyed += OnProxyDestroyed;
+
+        // Client sessions restore their state when the restorable channel reconnects. Subscribed after
+        // the RpcHandler (created above), so the handler's receive-loop restart runs before restore.
+        _channel.Opened += OnChannelOpened;
     }
 
     internal Session(IChannel channel, IChannelHost host)
@@ -117,9 +130,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         _logger.LogInformation("Session closed: {SessionId}", Id);
 
-        // Client sessions subscribe to this static event in their constructor; detach so the
-        // session (and everything it roots) can be collected. A no-op for server sessions.
+        // Client sessions subscribe to these in their constructor; detach so the session (and
+        // everything it roots) can be collected. A no-op for server sessions.
         InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
+        _channel.Opened -= OnChannelOpened;
 
         RefCounter<ICallTarget>[] instances;
 
@@ -128,30 +142,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             instances = _proxies.Values.ToArray();
             _proxies.Clear();
         }
+        lock (_restorableInstances)
+            _restorableInstances.Clear();
 
         await DisposeInstances(instances).ConfigureAwait(false);
 
-        KeyValuePair<Guid, RefCounter<ICallTarget>>[] adapters;
-        Dictionary<Guid, EventHandler<EventDataArgs>> handlers;
-        lock (_adapters)
-        {
-            adapters = [.. _adapters];
-            _adapters.Clear();
-            handlers = new(_adapterEventHandlers);
-            _adapterEventHandlers.Clear();
-        }
-
-        // Remove this session's event fan-out and notify ISessionsAware services before
-        // releasing, while the (possibly shared) adapter is still alive.
-        foreach (var (id, counter) in adapters)
-            CleanupAdapter(counter, handlers.GetValueOrDefault(id));
-
-        // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
-        // A shared (Host/Process) instance lives as one RefCounter across every
-        // session, so disposing it directly here would destroy it while other
-        // sessions still hold references — Release disposes only at the last one.
-        foreach (var (_, counter) in adapters)
-            counter.Release();
+        TeardownExposedAdapters();
 
         lock (_sessionInstances)
         {
@@ -167,27 +163,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             d.Dispose();
     }
 
-    public void Dispose()
+    // Releases every adapter this session exposed to the remote peer (callbacks passed to the server).
+    // Used both on session teardown and on a channel reopen — after a reopen the old remote session is
+    // gone and would never send a ReleaseInstancePacket for them. Whether the wrapped object is
+    // disposed is governed by the adapter's ownership flag (see RpcInterface.NoDispose).
+    private void TeardownExposedAdapters()
     {
-        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
-
-        _logger.LogInformation("Session closed: {SessionId}", Id);
-
-        // Client sessions subscribe to this static event in their constructor; detach so the
-        // session (and everything it roots) can be collected. A no-op for server sessions.
-        InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
-
-        RefCounter<ICallTarget>[] instances;
-
-        lock (_proxies)
-        {
-            instances = [.. _proxies.Values];
-            _proxies.Clear();
-        }
-
-        foreach (var instance in instances)
-            instance.Dispose();
-
         KeyValuePair<Guid, RefCounter<ICallTarget>>[] adapters;
         Dictionary<Guid, EventHandler<EventDataArgs>> handlers;
         lock (_adapters)
@@ -209,6 +190,33 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         // sessions still hold references — Release disposes only at the last one.
         foreach (var (_, counter) in adapters)
             counter.Release();
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        _logger.LogInformation("Session closed: {SessionId}", Id);
+
+        // Client sessions subscribe to these in their constructor; detach so the session (and
+        // everything it roots) can be collected. A no-op for server sessions.
+        InterfaceProxy.InstanceDestroyed -= OnProxyDestroyed;
+        _channel.Opened -= OnChannelOpened;
+
+        RefCounter<ICallTarget>[] instances;
+
+        lock (_proxies)
+        {
+            instances = [.. _proxies.Values];
+            _proxies.Clear();
+        }
+        lock (_restorableInstances)
+            _restorableInstances.Clear();
+
+        foreach (var instance in instances)
+            instance.Dispose();
+
+        TeardownExposedAdapters();
 
         lock (_sessionInstances)
         {
@@ -331,7 +339,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     internal async Task<T> CreateProxy<T>(CancellationToken cancellationToken)
     {
         var instanceId = await _handler.GetServiceInstanceAsync(typeof(T).GUID, cancellationToken).ConfigureAwait(false);
-        return (T)GetProxy(typeof(T), instanceId);
+        return (T)GetProxy(typeof(T), instanceId, restorable: true);
     }
 
     private void CheckDisposed()
@@ -410,9 +418,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         {
             if (!_instances.TryGetValue(instance, out refCounter))
             {
+                // Ownership is decided once, at adapter creation: an instance the caller marked with
+                // RpcInterface.NoDispose in the current flow is borrowed (not disposed by the adapter).
+                var ownsInstance = !RpcInterface.ConsumeBorrowed(instance);
                 refCounter = new RefCounter<ICallTarget>
                 (
-                    CreateAdapter(type, instance),
+                    CreateAdapter(type, instance, ownsInstance),
                     x =>
                     {
                         lock (_instances)
@@ -484,21 +495,26 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         instance.Release();
     }
 
-    internal object GetProxy(Type type, Guid instanceId)
+    internal object GetProxy(Type type, Guid instanceId, bool restorable = false)
     {
         lock (_proxies)
         {
-            RefCounter<ICallTarget>? proxyRef;
-
-            if (!_proxies.TryGetValue(instanceId, out proxyRef))
+            if (!_proxies.TryGetValue(instanceId, out var proxyRef))
             {
-                proxyRef = new RefCounter<ICallTarget>(new ServiceInstance(instanceId, _handler), x =>
+                var serviceInstance = new ServiceInstance(instanceId, _handler, type);
+                proxyRef = new RefCounter<ICallTarget>(serviceInstance, x =>
                 {
                     lock (_proxies)
                         _proxies.Remove(instanceId);
+                    lock (_restorableInstances)
+                        _restorableInstances.Remove(instanceId);
                     if (x is IDisposable d) d.Dispose();
                 });
                 _proxies.Add(instanceId, proxyRef);
+
+                if (restorable)
+                    lock (_restorableInstances)
+                        _restorableInstances[instanceId] = serviceInstance;
             }
 
             return InterfaceProxy.CreateProxy(instanceId, type, proxyRef, SerializationContext);
@@ -519,6 +535,11 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     private ICallTarget CreateAdapter(Type type, object instance)
     {
         return InterfaceAdapter.CreateAdapter(type, instance, SerializationContext);
+    }
+
+    private ICallTarget CreateAdapter(Type type, object instance, bool ownsInstance)
+    {
+        return InterfaceAdapter.CreateAdapter(type, instance, SerializationContext, ownsInstance);
     }
 
     private RefCounter<ICallTarget> GetServiceInstance(Guid interfaceId)
@@ -625,9 +646,17 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 {
                     var instance = GetAdapter(sfep.InstanceId) ??
                         throw new Exception("Unknown instance");
-                        
+
                     await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(sfep);
+                }
+                else if (request is SubscribeForEventsPacket sfeps)
+                {
+                    var instance = GetAdapter(sfeps.InstanceId) ??
+                        throw new Exception("Unknown instance");
+
+                    await instance.AttachEventHandlersAsync(sfeps.EventIds, cancellationToken).ConfigureAwait(false);
+                    return new SuccessPacket(sfeps);
                 }
                 else if (request is UnsubscribeFromEventPacket ufep)
                 {
@@ -668,6 +697,77 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         {
             if (_proxies.TryGetValue(instanceId, out var refCounter))
                 refCounter.Release();
+        }
+    }
+
+    private void OnChannelOpened(object? sender, EventArgs e)
+    {
+        // The first open is the primary connection; only subsequent opens (reconnects) restore state.
+        if (Interlocked.Increment(ref _openCount) == 1) return;
+        if (_isDisposed != 0) return;
+
+        lock (_restoreLock)
+        {
+            if (!_restoreTask.IsCompleted) return; // one restore at a time
+            _restoreTask = Task.Run(RestoreAsync);
+        }
+    }
+
+    // Re-establishes session state after the restorable channel reconnected to a brand-new remote
+    // session: invalidate proxies that cannot be restored, drop the callbacks exposed to the dead
+    // session, then re-request the root service proxies and replay their event subscriptions.
+    private async Task RestoreAsync()
+    {
+        try
+        {
+            HashSet<Guid> restorableIds;
+            ServiceInstance[] toRestore;
+            lock (_restorableInstances)
+            {
+                restorableIds = [.. _restorableInstances.Keys];
+                toRestore = [.. _restorableInstances.Values];
+            }
+
+            KeyValuePair<Guid, RefCounter<ICallTarget>>[] proxies;
+            lock (_proxies)
+                proxies = [.. _proxies];
+
+            // 1. Fail-fast every derived (non-restorable) proxy: its old instance id is meaningless
+            //    on the new session and can never be recreated there.
+            foreach (var (id, counter) in proxies)
+            {
+                if (restorableIds.Contains(id)) continue;
+
+                ICallTarget target;
+                try { target = counter.Value; }
+                catch (ObjectDisposedException) { continue; }
+
+                if (target is ServiceInstance si)
+                    si.Invalidate();
+            }
+
+            // 2. Drop the adapters this session exposed to the (now gone) remote session.
+            TeardownExposedAdapters();
+
+            // 3. Re-request the root service proxies and replay their subscriptions. Best-effort:
+            //    one failing instance must not abort the rest.
+            await Task.WhenAll(toRestore.Select(RestoreInstanceAsync)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Session restore failed after channel reopen: {SessionId}", Id);
+        }
+    }
+
+    private async Task RestoreInstanceAsync(ServiceInstance instance)
+    {
+        try
+        {
+            await instance.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to restore instance of type {Type}", instance.InterfaceType);
         }
     }
 }

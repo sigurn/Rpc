@@ -274,6 +274,17 @@ class RpcHandler : IDisposable
         await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task AttachEventsAsync(Guid instanceId, IReadOnlyList<int> eventIds, CancellationToken cancellationToken)
+    {
+        var request = new SubscribeForEventsPacket
+        {
+            InstanceId = instanceId,
+            EventIds = eventIds,
+        };
+
+        await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task DetachEventAsync(Guid instanceId, int eventId, CancellationToken cancellationToken)
     {
         var request = new UnsubscribeFromEventPacket

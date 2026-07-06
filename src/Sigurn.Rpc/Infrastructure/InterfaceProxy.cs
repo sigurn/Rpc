@@ -127,13 +127,11 @@ public class InterfaceProxy : IDisposable
         return obj is InterfaceProxy;
     }
 
-    public static IChannel? GetChannel<T>(T obj)
-    {
-        var ip = obj as InterfaceProxy;
-        if (ip is null) return null;
-        if (ip.CallTarget is ServiceInstance si) return si.Handler.Channel;
-        return null;
-    }
+    // Exposes the attached call target without throwing (unlike the private CallTarget), so helpers
+    // such as RpcInterface can inspect a proxy safely.
+    internal ICallTarget? CallTargetOrNull => _callTarget?.Value;
+
+    internal bool IsDisposedInternal => _isDisposed != 0;
 
     private readonly Guid _instanceId;
     private readonly Dictionary<int, int> _events = new();
