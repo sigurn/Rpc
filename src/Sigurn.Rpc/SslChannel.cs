@@ -35,7 +35,16 @@ public class SslChannel : BaseChannel, IAuthenticatedChannel, IAddressableChanne
         _protocol = protocol;
 
         _sslStream = new SslStream(new NetworkStream(_socket), false, ValidateRemoteCertificate);
-        _sslStream.AuthenticateAsServer(_certificate, requireClientCertificate, SslProtocols.Tls13 | SslProtocols.Tls12, true);
+        try
+        {
+            _sslStream.AuthenticateAsServer(_certificate, requireClientCertificate, SslProtocols.Tls13 | SslProtocols.Tls12, true);
+        }
+        catch
+        {
+            _sslStream.Dispose();   // flushes the TLS alert and closes the NetworkStream
+            _socket.Dispose();      // closes the TCP socket (NetworkStream was created with ownsSocket=false)
+            throw;
+        }
 
         State = ChannelState.Opened;
     }

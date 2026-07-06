@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
@@ -8,6 +9,39 @@ namespace Sigurn.Rpc.Tests;
 
 public class SslHostTests
 {
+    [Fact(Timeout = 15000)]
+    public async Task ServerHandshakeFailure_DisposesAcceptedSocket()
+    {
+        var certificate = new X509Certificate2(Path.Combine(GetSourceDirectory(), "sslhost.pfx"));
+
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen();
+        var endPoint = (IPEndPoint)listener.LocalEndPoint!;
+
+        using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(endPoint);
+
+        var serverSocket = await listener.AcceptAsync();
+
+        // Feed the server garbage instead of a TLS ClientHello and drop the connection so the
+        // server-side handshake fails deterministically.
+        await client.SendAsync(new byte[] { 0x00, 0x01, 0x02, 0x03, 0x04 }, SocketFlags.None);
+        client.Shutdown(SocketShutdown.Both);
+        client.Close();
+
+        // The server handshake must fail...
+        var error = Record.Exception(() =>
+            new SslChannel(serverSocket, certificate, (cert, chain) => true, false, new ChannelProtocol()));
+        Assert.NotNull(error);
+
+        // ...and the accepted socket must be closed rather than leaked.
+        Assert.True(serverSocket.SafeHandle.IsClosed,
+            "Accepted socket must be disposed after a failed server handshake.");
+
+        serverSocket.Dispose();
+    }
+
     [Fact]
     public void OpenCloseHost()
     {
