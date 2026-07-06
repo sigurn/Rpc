@@ -672,6 +672,91 @@ public class ServiceHostAsyncTests
     }
 
     [Fact(Timeout = 15000)]
+    public async Task ProcessNoDisposeSharedServiceIsNotDisposedOnDisconnect()
+    {
+        List<string> log = new ();
+        using ManualResetEvent destroyEvent = new (false);
+
+        var endPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        var endPointReady = new TaskCompletionSource<IPEndPoint?>();
+        var sh = new ServiceHostAsync();
+        sh.RegisterAcceptor(() =>
+        {
+            var acceptor = TcpHostAsync.Open(endPoint);
+            try
+            {
+                if (acceptor is ILocalAddress la)
+                {
+                    endPointReady.SetResult(IPEndPoint.Parse(la.LocalAddress));
+                }
+                else
+                {
+                    endPointReady.SetResult(null);
+                }
+            }
+            catch(Exception ex)
+            {
+                endPointReady.SetException(ex);
+            }
+
+            return acceptor;
+        });
+
+        // An externally-owned singleton: the same instance is returned every time the
+        // host asks the factory to create the process-wide instance.
+        var singleton = new TestService(log, destroyEvent);
+        sh.RegisterSerive<ITestService>(ShareWithin.ProcessNoDispose, () => singleton);
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(CurrentToken);
+
+        var runTask = sh.RunAsync(cts.Token);
+
+        var context = RpcPacket.DefaultSerializationContext;
+        var gip = new GetInstancePacket()
+        {
+            InterfaceId = typeof(ITestService).GUID
+        };
+
+        // Two clients acquire the shared instance.
+        var client1 = new TcpChannel(await endPointReady.Task ?? throw new Exception("Address is not awailable"));
+        await client1.OpenAsync(CurrentToken);
+        await client1.SendAsync(new Packet(await ToBytes<RpcPacket>(gip, context, CurrentToken)), CurrentToken);
+        Assert.IsType<ServiceInstancePacket>(await FromBytes<RpcPacket>((await client1.ReceiveAsync(cts.Token)).Data, context, CurrentToken));
+
+        var client2 = new TcpChannel(await endPointReady.Task ?? throw new Exception("Address is not awailable"));
+        await client2.OpenAsync(CurrentToken);
+        await client2.SendAsync(new Packet(await ToBytes<RpcPacket>(gip, context, CurrentToken)), CurrentToken);
+        Assert.IsType<ServiceInstancePacket>(await FromBytes<RpcPacket>((await client2.ReceiveAsync(cts.Token)).Data, context, CurrentToken));
+
+        Assert.Equal<IEnumerable<string>>(["Created"], log.ToImmutableArrayWithLock());
+
+        // All clients disconnect — with ProcessNoDispose the singleton must NOT be disposed.
+        await client1.CloseAsync(CurrentToken);
+        await client2.CloseAsync(CurrentToken);
+
+        Assert.False(destroyEvent.WaitOne(TimeSpan.FromSeconds(1)), "ProcessNoDispose instance must not be disposed when the last client disconnects.");
+        Assert.Equal<IEnumerable<string>>(["Created"], log.ToImmutableArrayWithLock());
+
+        // A late client reconnects and reuses the very same, still-alive singleton
+        // (no second "Created" — the factory hands back the same instance).
+        var client3 = new TcpChannel(await endPointReady.Task ?? throw new Exception("Address is not awailable"));
+        await client3.OpenAsync(CurrentToken);
+        await client3.SendAsync(new Packet(await ToBytes<RpcPacket>(gip, context, CurrentToken)), CurrentToken);
+        Assert.IsType<ServiceInstancePacket>(await FromBytes<RpcPacket>((await client3.ReceiveAsync(cts.Token)).Data, context, CurrentToken));
+
+        Assert.Equal<IEnumerable<string>>(["Created"], log.ToImmutableArrayWithLock());
+
+        await client3.CloseAsync(CurrentToken);
+
+        cts.Cancel();
+        await runTask;
+
+        // Lifetime is ours: the host never disposed the singleton.
+        Assert.False(destroyEvent.WaitOne(0));
+        Assert.DoesNotContain("Disposed", log.ToImmutableArrayWithLock());
+    }
+
+    [Fact(Timeout = 15000)]
     public async Task CallVoidMethodWithoutArgs()
     {
         List<string> log = new ();

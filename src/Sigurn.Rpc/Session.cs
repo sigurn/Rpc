@@ -532,12 +532,6 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         RefCounter<ICallTarget> instance;
 
-        var callTargetFactory = () =>
-        {
-            var callTarget = InterfaceAdapter.CreateAdapter(type, factory(), SerializationContext);
-            return new RefCounter<ICallTarget>(callTarget, x => (x as IDisposable)?.Dispose());
-        };
-
         switch (shared)
         {
             case ShareWithin.None:
@@ -558,6 +552,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
             case ShareWithin.Process:
                 instance = _serviceHost.CreateGlobalInstance(type, () => InterfaceAdapter.CreateAdapter(type, factory(), SerializationContext));
+                break;
+
+            case ShareWithin.ProcessNoDispose:
+                // Same process-wide sharing as Process, but the adapter does not own the
+                // instance, so the externally-managed singleton is never disposed by the host.
+                instance = _serviceHost.CreateGlobalInstance(type, () => InterfaceAdapter.CreateAdapter(type, factory(), SerializationContext, ownsInstance: false));
                 break;
 
             default:

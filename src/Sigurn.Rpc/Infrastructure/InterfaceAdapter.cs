@@ -66,6 +66,11 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
     internal static ICallTarget CreateAdapter(Type type, object instance, SerializationContext context)
     {
+        return CreateAdapter(type, instance, context, ownsInstance: true);
+    }
+
+    internal static ICallTarget CreateAdapter(Type type, object instance, SerializationContext context, bool ownsInstance)
+    {
         if (!type.IsInterface)
             throw new NotSupportedException($"Adapters can be created for interfaces only. Provided type {type} is not interface.");
 
@@ -78,6 +83,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
         var adapter = factory(instance);
         adapter.Context = context;
+        adapter._ownsInstance = ownsInstance;
 
         return adapter;
     }
@@ -102,6 +108,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     }
 
     private volatile int _isDisposed = 0;
+    private bool _ownsInstance = true;
     private IDisposable? _disposable = null;
     private SerializationContext _context = RpcPacket.DefaultSerializationContext;
     private readonly object _instance;
@@ -129,7 +136,10 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
         // the service. This is the single owner for every sharing scope (None,
         // Session, Host, Process) and for sub-services returned from calls, so
         // session-scoped services release their resources on session teardown.
-        (_instance as IDisposable)?.Dispose();
+        // The exception is ShareWithin.ProcessNoDispose, where the instance is an
+        // externally-owned singleton the host must not dispose.
+        if (_ownsInstance)
+            (_instance as IDisposable)?.Dispose();
 
         _disposable?.Dispose();
     }
