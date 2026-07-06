@@ -254,17 +254,22 @@ public class RpcHandlerTests
         Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
         Assert.NotNull(serverChannel);
 
+        // SuccessPacket/ErrorPacket are response kinds and are never dispatched as requests; drive the
+        // request/response plumbing with real request packets (GetInstance/GetProperty) that the server
+        // answers with the matching response kind.
         using var serverHandler = new RpcHandler(serverChannel, async (request, cancellationToken) =>
         {
             log.AddWithLock($"Start: {request.GetType().Name}");
-            if (request is SuccessPacket)
+            if (request is GetInstancePacket)
                 await Task.Delay(TimeSpan.FromMilliseconds(500));
             log.AddWithLock($"Finish: {request.GetType().Name}");
-            return request;
+            return request is GetInstancePacket
+                ? new SuccessPacket(request)
+                : new ErrorPacket(request);
         });
 
-        var packet1 = new SuccessPacket();
-        var packet2 = new ErrorPacket();
+        var packet1 = new GetInstancePacket();
+        var packet2 = new GetPropertyPacket();
         var req1 = handler.RequestAsync(packet1, cts.Token);
         var req2 = handler.RequestAsync(packet2, cts.Token);
         var answer2 = await req2;
@@ -276,7 +281,7 @@ public class RpcHandlerTests
         var ep = (ErrorPacket)answer2;
         Assert.Equal(packet2.RequestId, ep.RequestId);
 
-        var expectedLog = new string[] { "Start: SuccessPacket", "Start: ErrorPacket", "Finish: ErrorPacket", "Finish: SuccessPacket" };
+        var expectedLog = new string[] { "Start: GetInstancePacket", "Start: GetPropertyPacket", "Finish: GetPropertyPacket", "Finish: GetInstancePacket" };
 
         Assert.Equal(expectedLog.Order(), log.ToImmutableArrayWithLock().Order());
     }
@@ -405,6 +410,58 @@ public class RpcHandlerTests
         public override SynchronizationContext CreateCopy() => this;
     }
 
+    // A response-type packet (e.g. ServiceInstancePacket) whose RequestId matches no pending request must
+    // NOT be dispatched to the request handler. This reproduces the reconnect/restore failure where a
+    // response that arrives after its request was already dropped from _requests was misinterpreted as an
+    // incoming request -> "Unknown packet" -> an ExceptionPacket bounced back. Responses are identified by
+    // their kind, not merely by presence in _requests, so an orphan response is dropped silently.
+    [Fact(Timeout = 15000)]
+    public async Task OrphanResponsePacketIsDroppedNotDispatchedAsRequestTest()
+    {
+        IChannel? serverChannel = null;
+        using var host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+
+        using ManualResetEvent connectEvent = new ManualResetEvent(false);
+        host.Connected += (s, a) =>
+        {
+            serverChannel = a.Channel;
+            connectEvent.Set();
+        };
+
+        host.Open();
+
+        using var channel = new TcpChannel(host.EndPoint);
+
+        int handlerCalls = 0;
+        using var handler = new RpcHandler(channel, (request, cancellationToken) =>
+        {
+            Interlocked.Increment(ref handlerCalls);
+            return Task.FromResult<RpcPacket?>(new SuccessPacket(request));
+        });
+
+        using var cts = new CancellationTokenSource();
+        await channel.OpenAsync(cts.Token);
+
+        Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
+        Assert.NotNull(serverChannel);
+
+        // Send a response packet that corresponds to no in-flight request on the handler.
+        var orphan = new ServiceInstancePacket { InstanceId = Guid.NewGuid() };
+        var bytes = await orphan.ToBytesAsync(RpcPacket.DefaultSerializationContext, cts.Token);
+        await serverChannel!.SendAsync(IPacket.Create(bytes), cts.Token);
+
+        // The handler must neither dispatch it as a request nor bounce anything back.
+        var serverRecv = serverChannel.ReceiveAsync(cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+
+        Assert.False(serverRecv.IsCompleted, "Orphan response was misrouted and bounced back as a request answer");
+        Assert.Equal(0, Volatile.Read(ref handlerCalls));
+
+        cts.Cancel();
+        try { await serverRecv; } catch { /* cancelled receive */ }
+    }
+
     [Fact(Timeout = 15000)]
     public async Task ClientRequestCancelationCancelsRequestOnServerTest()
     {
@@ -432,7 +489,7 @@ public class RpcHandlerTests
         Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
         Assert.NotNull(serverHandler);
 
-        serverHandler.Handle<SuccessPacket>(async (p, ct) =>
+        serverHandler.Handle<GetInstancePacket>(async (p, ct) =>
         {
             using var ctr = ct.Register(() =>
             {
@@ -445,7 +502,7 @@ public class RpcHandlerTests
         });
 
         CancellationTokenSource rcts = new CancellationTokenSource();
-        var packet = new SuccessPacket();
+        var packet = new GetInstancePacket();
         var requestTask = handler.RequestAsync(packet, rcts.Token);
         Assert.True(requestReceivedEvent.WaitOne(TimeSpan.FromSeconds(5)));
         rcts.Cancel();
@@ -484,7 +541,7 @@ public class RpcHandlerTests
         Assert.True(connectEvent.WaitOne(TimeSpan.FromSeconds(5)));
         Assert.NotNull(serverHandler);
 
-        serverHandler.Handle<SuccessPacket>(async (p, ct) =>
+        serverHandler.Handle<GetInstancePacket>(async (p, ct) =>
         {
             using var ctr = ct.Register(() => requestCancelledEvent.Set());
             requestReceivedEvent.Set();
@@ -493,7 +550,7 @@ public class RpcHandlerTests
             return null;
         });
 
-        var packet = new SuccessPacket();
+        var packet = new GetInstancePacket();
         // Fire the request without awaiting - the server handler will block until cancelled.
         _ = handler.RequestAsync(packet, cts.Token);
         Assert.True(requestReceivedEvent.WaitOne(TimeSpan.FromSeconds(5)));

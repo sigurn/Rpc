@@ -397,13 +397,20 @@ class RpcHandler : IDisposable
                 var request = await RpcPacket.FromPacketAsync(packet, _context, cancellationToken).ConfigureAwait(false);
                 if (request is null) continue;
 
-                if (_requests.TryGetValue(request.RequestId, out var tcs))
+                // A response is matched to its pending request by RequestId. If nothing is waiting for it
+                // (its request was already dropped, e.g. cleared by a fault during a reconnect), drop it —
+                // never fall through and treat a response as an incoming request.
+                if (request.IsResponse)
                 {
-                    ThreadPool.QueueUserWorkItem(state =>
-                    {
-                        if (state is RpcPacket packet)
-                            tcs.TrySetResult(request);
-                    }, request);
+                    if (_requests.TryGetValue(request.RequestId, out var tcs))
+                        ThreadPool.QueueUserWorkItem(state =>
+                        {
+                            if (state is RpcPacket packet)
+                                tcs.TrySetResult(packet);
+                        }, request);
+                    else
+                        _logger.LogDebug("Dropping orphan response {PacketType} for request {RequestId}",
+                            request.GetType().Name, request.RequestId);
                     continue;
                 }
 

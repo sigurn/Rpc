@@ -219,6 +219,96 @@ public class RestorableSessionTests
         tcpHost.Close();
     }
 
+    [Fact(Timeout = 60000)]
+    public async Task Reopen_MethodCallsWorkAfterInstanceAndSubscriptionRestore()
+    {
+        DualProbe? probe = null;
+        var tcpHost = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<ITestService>(ShareWithin.Session, () => new TestService(new List<string>()));
+        sh.RegisterSerive<IDualProbe>(ShareWithin.Session, () => probe = new DualProbe());
+        sh.Start();
+
+        await using var client = NewClient(tcpHost);
+        await client.OpenAsync(CurrentToken);
+
+        var service = await client.GetService<ITestService>(CurrentToken);
+        var dp = await client.GetService<IDualProbe>(CurrentToken);
+
+        int events = 0;
+        dp.First += (s, e) => Interlocked.Increment(ref events);
+        Assert.Equal(5, service.Add(2, 3));
+
+        int faults = 0;
+        client.Faulted += (s, e) => Interlocked.Increment(ref faults);
+
+        // A background caller that keeps hammering the restored proxy right through the reconnect, so
+        // requests are in flight across the fault/reopen. Records the last time a call actually succeeded;
+        // if the receive loop ever wedges (responses stop matching pending requests) this stops advancing.
+        long lastSuccessTick = Environment.TickCount64;
+        var hammering = true;
+        var hammer = Task.Run(() =>
+        {
+            while (Volatile.Read(ref hammering))
+            {
+                try
+                {
+                    if (service.Add(7, 8) == 15)
+                        Volatile.Write(ref lastSuccessTick, Environment.TickCount64);
+                }
+                catch { /* transient reopen-window failures are expected */ }
+            }
+        }, CurrentToken);
+
+        // Several reconnect cycles: each restores the instances and replays the subscription, then we make
+        // real method calls on the restored proxy. Reproduces a hang where post-restore calls never get a
+        // response back.
+        for (int cycle = 0; cycle < 5; cycle++)
+        {
+            var faultsBefore = Volatile.Read(ref faults);
+            sh.Stop();
+            Assert.True(WaitUntil(() => client.State == ChannelState.Faulted || client.State == ChannelState.Opening,
+                TimeSpan.FromSeconds(5)), $"Client never faulted after server stop (cycle {cycle})");
+            sh.Start();
+
+            // Wait until the instance + subscription restore has completed for this cycle.
+            Assert.True(WaitUntil(() => probe is not null && probe.FirstSubscribers == 1, TimeSpan.FromSeconds(15)),
+                $"Subscription not restored after reopen (cycle {cycle})");
+
+            // A single stop/start must cause exactly one fault. A spurious re-fault after a successful
+            // restore is the bug: it tears the healthy connection back down.
+            Thread.Sleep(500);
+            Assert.Equal(faultsBefore + 1, Volatile.Read(ref faults));
+
+            // Every method call on the restored proxy must get its response back promptly (retry only across
+            // the brief reopen window; a permanent failure/hang here is the reported bug).
+            for (int i = 0; i < 20; i++)
+            {
+                Assert.True(WaitUntil(() =>
+                {
+                    try { return service.Add(i, 1) == i + 1; }
+                    catch (InvalidOperationException) { return false; }
+                }, TimeSpan.FromSeconds(10)), $"Method call {i} did not complete after restore (cycle {cycle})");
+            }
+
+            // And the restored subscription must still deliver events.
+            var before = Volatile.Read(ref events);
+            Assert.True(WaitUntil(() => { probe!.RaiseFirst(); return Volatile.Read(ref events) > before; },
+                TimeSpan.FromSeconds(5)), $"Event not delivered after restore (cycle {cycle})");
+
+            // The background hammer must have made forward progress recently: a wedged receive loop would
+            // leave lastSuccessTick stale (all calls hanging until timeout).
+            Assert.True(WaitUntil(() => Environment.TickCount64 - Volatile.Read(ref lastSuccessTick) < 2000,
+                TimeSpan.FromSeconds(20)), $"Background calls stopped completing after restore (cycle {cycle})");
+        }
+
+        Volatile.Write(ref hammering, false);
+        await hammer;
+
+        sh.Stop();
+        tcpHost.Close();
+    }
+
     [Fact(Timeout = 20000)]
     public async Task Reopen_RestoresMethodCalls()
     {

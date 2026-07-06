@@ -76,6 +76,18 @@ abstract class RpcPacket
 
     public Guid RequestId { get; private set; }
 
+    // True for packets that answer an outgoing request. The receive loop routes these to the pending
+    // request they complete (matched by RequestId) and drops them when none matches, instead of treating
+    // an unmatched packet as an incoming request. Relying on _requests membership alone misrouted a
+    // response that arrived after its request was already dropped (e.g. cleared by a fault during a
+    // reconnect/restore) as a fresh request -> "Unknown packet".
+    internal bool IsResponse => _packageType switch
+    {
+        PacketType.Success or PacketType.Exception or PacketType.Error or PacketType.ServerException or
+        PacketType.ServiceInstance or PacketType.MethodResult or PacketType.PropertyValue => true,
+        _ => false,
+    };
+
     protected abstract Task FromStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
 
     protected abstract Task ToStreamAsync(Stream stream, SerializationContext context, CancellationToken cancellationToken);
