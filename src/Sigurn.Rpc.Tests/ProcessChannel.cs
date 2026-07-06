@@ -130,13 +130,13 @@ public class ProcessChannelTests
         {
             process.Refresh();
             if (process.HasExited) break;
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
         }
         Assert.True(process.HasExited);
         for(int i=0; i<10; i++)
         {
             if (channel.State != ChannelState.Opened) break;
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
         }
         Assert.Equal(ChannelState.Faulted, channel?.State);
     }

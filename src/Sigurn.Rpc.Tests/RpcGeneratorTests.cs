@@ -85,12 +85,12 @@ namespace MyCode
     }
 }
 ");
-        var diag = inputCompilation.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error);
+        var diag = inputCompilation.GetDiagnostics(TestContext.Current.CancellationToken).Where(x => x.Severity == DiagnosticSeverity.Error);
         Assert.Empty(diag);
 
         RpcGenerator generator = new RpcGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
-        driver = driver.RunGenerators(inputCompilation);
+        driver = driver.RunGenerators(inputCompilation, TestContext.Current.CancellationToken);
         await Verify(driver);
     }
 

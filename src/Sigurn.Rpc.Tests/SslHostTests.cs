@@ -12,7 +12,7 @@ public class SslHostTests
     [Fact(Timeout = 15000)]
     public async Task ServerHandshakeFailure_DisposesAcceptedSocket()
     {
-        var certificate = new X509Certificate2(Path.Combine(GetSourceDirectory(), "sslhost.pfx"));
+        var certificate = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine(GetSourceDirectory(), "sslhost.pfx"), null);
 
         using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
@@ -20,9 +20,9 @@ public class SslHostTests
         var endPoint = (IPEndPoint)listener.LocalEndPoint!;
 
         using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await client.ConnectAsync(endPoint);
+        await client.ConnectAsync(endPoint, TestContext.Current.CancellationToken);
 
-        var serverSocket = await listener.AcceptAsync();
+        var serverSocket = await listener.AcceptAsync(TestContext.Current.CancellationToken);
 
         // Feed the server garbage instead of a TLS ClientHello and drop the connection so the
         // server-side handshake fails deterministically.
@@ -53,7 +53,7 @@ public class SslHostTests
     [Fact(Timeout = 15000)]
     public async Task AcceptConnectionTest()
     {
-        var certificate = new X509Certificate2(Path.Combine(GetSourceDirectory(), "sslhost.pfx"));
+        var certificate = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine(GetSourceDirectory(), "sslhost.pfx"), null);
 
         BlockingCollection<string> eventHistory = new();
         using AutoResetEvent connectionEvent = new AutoResetEvent(false);

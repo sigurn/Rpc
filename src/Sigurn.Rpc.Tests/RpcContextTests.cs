@@ -84,7 +84,7 @@ public class RpcContextTests
         var task = Task.Run(() =>
         {
             captured = RpcContext.Current;
-        });
+        }, TestContext.Current.CancellationToken);
 
         using var ctx = new RpcContext { Timeout = TimeSpan.FromSeconds(1) };
         await task;

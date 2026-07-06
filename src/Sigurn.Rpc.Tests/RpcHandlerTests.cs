@@ -133,7 +133,7 @@ public class RpcHandlerTests
             .ContinueWith(t =>
             {
                 serverChannel.SendAsync(t.Result, cts.Token);
-            });
+            }, cts.Token);
 
         var packet = new SuccessPacket();
         var answer = await handler.RequestAsync(packet, cts.Token);
@@ -172,7 +172,7 @@ public class RpcHandlerTests
             .ContinueWith(t =>
             {
                 serverChannel.SendAsync(t.Result, cts.Token);
-            });
+            }, cts.Token);
 
         var packet = new SuccessPacket();
         var answer = await handler.RequestAsync(packet, cts.Token);
@@ -185,7 +185,7 @@ public class RpcHandlerTests
             .ContinueWith(t =>
             {
                 serverChannel.SendAsync(t.Result, cts.Token);
-            });
+            }, cts.Token);
 
         answer = await handler.RequestAsync(packet, cts.Token);
         await serverTask;

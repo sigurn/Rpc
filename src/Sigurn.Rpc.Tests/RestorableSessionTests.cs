@@ -495,7 +495,7 @@ public class RestorableSessionTests
         sh.Start();
 
         // On reopen the client's exposed adapter is torn down; an owned instance is disposed.
-        Assert.True(callback.Disposed.Wait(TimeSpan.FromSeconds(10)),
+        Assert.True(callback.Disposed.Wait(TimeSpan.FromSeconds(10), CurrentToken),
             "Owned interface passed to the server was not disposed on reopen");
 
         sh.Stop();

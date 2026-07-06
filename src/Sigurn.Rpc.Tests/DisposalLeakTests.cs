@@ -21,11 +21,13 @@ public class DisposalLeakTests
         public ChannelState State { get; private set; } = ChannelState.Created;
         public object? BoundObject { get; set; }
 
+#pragma warning disable CS0067 // interface-mandated events this test double never raises
         public event EventHandler? Opening;
         public event EventHandler? Opened;
         public event EventHandler? Closing;
         public event EventHandler? Closed;
         public event EventHandler? Faulted;
+#pragma warning restore CS0067
 
         public Task OpenAsync(CancellationToken cancellationToken)
         {
@@ -70,8 +72,10 @@ public class DisposalLeakTests
         public bool IsOpened => false;
         public void Open() => throw new InvalidOperationException("cannot open host");
         public void Close() { }
+#pragma warning disable CS0067 // interface-mandated events this test double never raises
         public event EventHandler<ChannelEventArgs>? Connected;
         public event EventHandler<ChannelEventArgs>? Disconnected;
+#pragma warning restore CS0067
     }
 
     private static T? GetField<T>(object target, string name)
