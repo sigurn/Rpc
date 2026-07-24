@@ -386,6 +386,7 @@ class RpcHandler : IDisposable
     private async Task StartPacketHandling(CancellationToken cancellationToken)
     {
         List<Task> tasks = [];
+        int consecutiveFailures = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -394,6 +395,7 @@ class RpcHandler : IDisposable
                     !await WaitForChannelOpenAsync(_channel, cancellationToken).ConfigureAwait(false)) return;
 
                 var packet = await _channel.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+                consecutiveFailures = 0;
                 var request = await RpcPacket.FromPacketAsync(packet, _context, cancellationToken).ConfigureAwait(false);
                 if (request is null) continue;
 
@@ -464,6 +466,27 @@ class RpcHandler : IDisposable
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Error during RPC packet handling");
+
+                if (cancellationToken.IsCancellationRequested) break;
+
+                // A failure which leaves the channel Opened (e.g. a transport that does not fault on
+                // a dead socket) would be retried immediately on the next iteration, turning a persistent
+                // error into a CPU pinning hot loop. Back off on repeated failures; a single failure
+                // still retries at once so the normal path stays responsive.
+                consecutiveFailures++;
+                if (consecutiveFailures > 1)
+                {
+                    var delay = TimeSpan.FromMilliseconds(Math.Min(1000, 50 * (1 << Math.Min(consecutiveFailures - 2, 5))));
+                    try
+                    {
+                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+
                 continue;
             }
         }

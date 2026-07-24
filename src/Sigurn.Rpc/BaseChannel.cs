@@ -273,13 +273,32 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
                 throw new InvalidOperationException("The receive operation is already running. Cannot run concurrent receive operations.");
 
             _receiveCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            task = InternalReceiveAsync(_receiveCancellationSource.Token);
+            // A synchronous throw is turned into a faulted task so that it goes through the same
+            // failure handling below instead of escaping while still holding the lock.
+            try
+            {
+                task = InternalReceiveAsync(_receiveCancellationSource.Token);
+            }
+            catch (Exception ex)
+            {
+                task = Task.FromException<IPacket>(ex);
+            }
             _receiveTask = task;
         }
 
+        Exception? failure = null;
         try
         {
             return await task.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A transport failure seen only through the receive path (an idle client receiving
+            // server pushes) must fault the channel, otherwise the state stays Opened, no Faulted
+            // event is raised and the reconnect machinery never engages. Cancellation is a normal
+            // teardown - both the caller's own token and the one CloseAsync cancels - and never faults.
+            failure = ex;
+            throw;
         }
         finally
         {
@@ -288,7 +307,10 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
                 _receiveTask = null;
                 _receiveCancellationSource?.Dispose();
                 _receiveCancellationSource = null;
-            }            
+            }
+
+            if (failure is not null && State == ChannelState.Opened)
+                GoToFaultedState();
         }
     }
 
@@ -310,13 +332,28 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
                 throw new InvalidOperationException("The send operation is already running. Cannot run concurrent send operations.");
 
             _sendCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            task = InternalSendAsync(packet, _sendCancellationSource.Token);
+            // See ReceiveAsync: a synchronous throw becomes a faulted task so it is handled uniformly.
+            try
+            {
+                task = InternalSendAsync(packet, _sendCancellationSource.Token);
+            }
+            catch (Exception ex)
+            {
+                task = Task.FromException<IPacket>(ex);
+            }
             _sendTask = task;
         }
 
+        Exception? failure = null;
         try
         {
             return await task.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Same as in ReceiveAsync: a send failure is a transport failure and must fault the channel.
+            failure = ex;
+            throw;
         }
         finally
         {
@@ -325,7 +362,10 @@ public abstract class BaseChannel : IChannel, IDisposable, IAsyncDisposable
                 _sendTask = null;
                 _sendCancellationSource?.Dispose();
                 _sendCancellationSource = null;
-            }            
+            }
+
+            if (failure is not null && State == ChannelState.Opened)
+                GoToFaultedState();
         }
     }
 
