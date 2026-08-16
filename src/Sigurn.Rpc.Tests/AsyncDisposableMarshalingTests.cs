@@ -325,6 +325,43 @@ public class AsyncDisposableMarshalingTests
         Assert.Equal(1, service.Resource.DisposeAsyncCount);
     }
 
+    // --- C2. Asynchronous disposal of any proxy -----------------------------------------
+
+    // Releasing a reference is the same operation for every remote interface, so any proxy — not just
+    // one typed as IAsyncDisposable — can be released asynchronously and awaited.
+    [Fact(Timeout = 15000)]
+    public async Task AnyProxy_CanBeDisposedAsynchronously()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var service = new AsyncResourceService();
+        await using var harness = await StartAsync(service, ct);
+
+        var notification = harness.Proxy.GetDualRole();
+
+        await ((IAsyncDisposable)notification).DisposeAsync();
+
+        // Confirmed release: the server has already disposed the instance behind the proxy.
+        Assert.Equal(1, service.DualRole.DisposeAsyncCount);
+    }
+
+    [Fact(Timeout = 15000)]
+    public async Task AnyProxy_DisposeAndDisposeAsync_ReleaseExactlyOnce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var service = new AsyncResourceService();
+        await using var harness = await StartAsync(service, ct);
+
+        var notification = harness.Proxy.GetDualRole();
+        var mark = harness.Recorder.Sent.Count;
+
+        ((IDisposable)notification).Dispose();
+        await ((IAsyncDisposable)notification).DisposeAsync();
+
+        Assert.Single(SentSince(harness, mark).OfType<ReleaseInstancePacket>());
+        await WaitForAsync(() => service.DualRole.DisposeAsyncCount == 1, TimeSpan.FromSeconds(5));
+        Assert.Equal(1, service.DualRole.DisposeAsyncCount);
+    }
+
     // --- D. DTO field -------------------------------------------------------------------
 
     [Fact(Timeout = 15000)]

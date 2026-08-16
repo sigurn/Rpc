@@ -4,11 +4,11 @@ using Sigurn.Serialize;
 
 namespace Sigurn.Rpc.Infrastructure;
 
-public class InterfaceProxy : IDisposable
+public class InterfaceProxy : IDisposable, IAsyncDisposable
 {
     private static readonly ILogger<InterfaceProxy> _logger = RpcLogging.CreateLogger<InterfaceProxy>();
 
-    private static readonly List<Action<Guid>> _handlers = new();
+    private static readonly List<Action<Guid>> _handlers = [];
 
     internal static void NotifyAboutInstanceDestruction(Guid instanceId)
     {
@@ -16,7 +16,7 @@ public class InterfaceProxy : IDisposable
         {
             Action<Guid>[] handlers;
             lock (_handlers)
-                handlers = _handlers.ToArray();
+                handlers = [.. _handlers];
 
             foreach (var handler in handlers)
             {
@@ -48,7 +48,7 @@ public class InterfaceProxy : IDisposable
         }
     }
 
-    private static Dictionary<Type, Func<Guid, object>> _factories = new();
+    private readonly static Dictionary<Type, Func<Guid, object>> _factories = [];
 
     static InterfaceProxy()
     {
@@ -135,7 +135,7 @@ public class InterfaceProxy : IDisposable
     internal bool IsDisposedInternal => _isDisposed != 0;
 
     private readonly Guid _instanceId;
-    private readonly Dictionary<int, int> _events = new();
+    private readonly Dictionary<int, int> _events = [];
 
     private RefCounter<ICallTarget>? _callTarget;
     private EventHandler<EventDataArgs>? _eventHandler;
@@ -153,8 +153,17 @@ public class InterfaceProxy : IDisposable
         NotifyAboutInstanceDestruction(_instanceId);
     }
 
+    /// <summary>
+    /// Releases this proxy's reference to the remote instance. Telling the remote side is best-effort:
+    /// the notification is sent without waiting for it to be acted upon. Use <see cref="DisposeAsync"/>
+    /// to await the remote release instead.
+    /// </summary>
     public void Dispose()
     {
+        // Suppressed unconditionally: a proxy that was disposed must never let the finalizer report its
+        // instance as destroyed afterwards, even when it held no reference to release.
+        GC.SuppressFinalize(this);
+
         var callTarget = DetachForRelease();
         if (callTarget is null) return;
 
@@ -167,15 +176,25 @@ public class InterfaceProxy : IDisposable
         {
             // The session already tore this instance down (client disposed, channel gone). Releasing
             // an already-released reference is a no-op, not an error for the caller.
-            _logger.LogDebug(ex, "Call target already released for proxy {InstanceId}", _instanceId);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Call target already released for proxy {InstanceId}", _instanceId);
         }
     }
 
-    // Asynchronous release, used by proxies whose interface exposes asynchronous disposal
-    // (see AsyncDisposableProxy). Shares the disposal guard with Dispose, so the reference is
-    // released exactly once no matter which of the two is called, or in which order.
-    protected internal async ValueTask ReleaseAsync()
+    /// <summary>
+    /// Releases this proxy's reference to the remote instance and waits for the remote side to act on
+    /// it. When this is the last reference, the remote instance has been disposed by the time the call
+    /// returns, and an exception thrown by that disposal surfaces to the caller.
+    /// </summary>
+    /// <remarks>
+    /// Shares the disposal guard with <see cref="Dispose"/>, so the reference is released exactly once
+    /// no matter which of the two is called, or in which order. No remote method call is involved:
+    /// disposing a proxy is a reference release, never a call on the remote object.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
     {
+        GC.SuppressFinalize(this);
+
         var callTarget = DetachForRelease();
         if (callTarget is null) return;
 
@@ -186,7 +205,8 @@ public class InterfaceProxy : IDisposable
         }
         catch (ObjectDisposedException ex)
         {
-            _logger.LogDebug(ex, "Call target already released for proxy {InstanceId}", _instanceId);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Call target already released for proxy {InstanceId}", _instanceId);
         }
     }
 
@@ -195,9 +215,6 @@ public class InterfaceProxy : IDisposable
     private RefCounter<ICallTarget>? DetachForRelease()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return null;
-
-        GC.SuppressFinalize(this);
-
         return Interlocked.Exchange(ref _callTarget, null);
     }
 

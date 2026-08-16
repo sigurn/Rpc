@@ -552,6 +552,18 @@ How it works, and what it guarantees:
 - **Keeping ownership**: pass the instance through `RpcInterface.NoDispose(instance)` and the RPC
   layer will release the reference without disposing the object.
 
+Releasing a reference is the same operation for every remote interface, so **any proxy** can be
+released this way — not only one typed as `IAsyncDisposable`:
+
+```csharp
+await using var service = await client.GetService<IMyService>(cancellationToken);
+// or synchronously, without waiting for the remote release:
+((IDisposable)service).Dispose();
+```
+
+`Dispose()` sends the release without waiting for it; `await DisposeAsync()` returns once the remote
+side has acted on it. Either way it is a reference release, never a call on the remote object.
+
 ### Session Management
 
 #### Server-Side Session Access

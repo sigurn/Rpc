@@ -16,16 +16,16 @@ namespace Sigurn.Rpc.Infrastructure;
 /// per marshaling over a single shared reference count. Only the last release reaches the wire, so
 /// <c>await DisposeAsync()</c> on a non-final proxy returns immediately without disposing anything.
 /// </para>
+/// <para>
+/// The proxy needs no members of its own: releasing a reference is what every
+/// <see cref="InterfaceProxy"/> already does, and <see cref="InterfaceProxy.DisposeAsync"/> is exactly
+/// the operation this interface asks for.
+/// </para>
 /// </remarks>
-sealed class AsyncDisposableProxy : InterfaceProxy, IAsyncDisposable
+sealed class AsyncDisposableProxy : InterfaceProxy
 {
     public AsyncDisposableProxy(Guid instanceId)
         : base(instanceId)
     {
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        return ReleaseAsync();
     }
 }
