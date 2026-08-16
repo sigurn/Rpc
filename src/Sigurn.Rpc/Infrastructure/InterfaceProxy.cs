@@ -26,7 +26,8 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Instance destruction handler failed");
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                        _logger.LogDebug(ex, "Instance destruction handler failed");
                     continue;
                 }
             }
@@ -70,6 +71,7 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
         var proxy = factory(instanceId);
         if (proxy is InterfaceProxy ip)
         {
+            ip.InterfaceType = typeof(T);
             ip.Context = context;
             ip.AttachCallTarget(callTarget);
         }
@@ -88,6 +90,7 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
                 throw new Exception($"There is no proxy for type '{type}'");
 
         var proxy = (InterfaceProxy)factory(instanceId);
+        proxy.InterfaceType = type;
         proxy.Context = context;
         proxy.AttachCallTarget(callTarget);
 
@@ -137,6 +140,11 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
     private readonly Guid _instanceId;
     private readonly Dictionary<int, int> _events = [];
 
+    // The remote interface this proxy stands for. Set by the CreateProxy factories, which is the
+    // only way a registered proxy is instantiated. It backs the default RpcInterfaceName, so even
+    // a hand-written proxy that does not override it reports a real interface name in the log.
+    private Type? _interfaceType;
+
     private RefCounter<ICallTarget>? _callTarget;
     private EventHandler<EventDataArgs>? _eventHandler;
     private SerializationContext _context = RpcPacket.DefaultSerializationContext;
@@ -166,6 +174,9 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
 
         var callTarget = DetachForRelease();
         if (callTarget is null) return;
+
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Proxy released: {InstanceId} interface={Interface}", _instanceId, RpcInterfaceName);
 
         try
         {
@@ -198,6 +209,9 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
         var callTarget = DetachForRelease();
         if (callTarget is null) return;
 
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Proxy released: {InstanceId} interface={Interface}", _instanceId, RpcInterfaceName);
+
         try
         {
             callTarget.Value.EventTriggered -= _eventHandler;
@@ -219,6 +233,57 @@ public class InterfaceProxy : IDisposable, IAsyncDisposable
     }
 
     public Guid InstanceId => _instanceId;
+
+    internal Type? InterfaceType
+    {
+        get => _interfaceType;
+        set => _interfaceType = value;
+    }
+
+    /// <summary>
+    /// Full name of the remote interface, used in trace messages. Generated proxies override it
+    /// with a compile time constant.
+    /// </summary>
+    protected virtual string RpcInterfaceName =>
+        _interfaceType?.FullName ?? GetType().FullName ?? GetType().Name;
+
+    /// <summary>
+    /// True when trace logging is on. Call sites check it before building trace arguments so that
+    /// nothing is computed when the level is off.
+    /// </summary>
+    protected static bool IsTraceEnabled => _logger.IsEnabled(LogLevel.Trace);
+
+    /// <summary>Traces the start of a remote member access.</summary>
+    protected void TraceEnter(RpcTraceOperation operation, string member, int memberId)
+    {
+        if (!_logger.IsEnabled(LogLevel.Trace)) return;
+
+        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
+            operation, RpcInterfaceName, member, memberId, _instanceId);
+    }
+
+    /// <summary>Traces the end of a remote member access.</summary>
+    protected void TraceExit(RpcTraceOperation operation, string member, int memberId)
+    {
+        if (!_logger.IsEnabled(LogLevel.Trace)) return;
+
+        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
+            operation, RpcInterfaceName, member, memberId, _instanceId);
+    }
+
+    /// <summary>
+    /// Traces a failed remote member access and always returns false, so it can be used as an
+    /// exception filter (<c>catch (Exception ex) when (TraceFailure(ex, ...))</c>). The filter runs
+    /// during the first pass, which logs the failure without catching it or unwinding the stack.
+    /// </summary>
+    protected bool TraceFailure(Exception exception, RpcTraceOperation operation, string member, int memberId)
+    {
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} FAILED",
+                operation, RpcInterfaceName, member, memberId, _instanceId);
+
+        return false;
+    }
 
     private void AttachCallTarget(RefCounter<ICallTarget> callTarget)
     {

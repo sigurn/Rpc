@@ -42,7 +42,8 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Releasing remote instance {InstanceId} failed", InstanceId);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Releasing remote instance {InstanceId} failed", InstanceId);
         }
         finally
         {

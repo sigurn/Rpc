@@ -69,6 +69,10 @@ namespace Sigurn.Rpc.Generator
             sb.Append("\n");
             sb.Append($"using Sigurn.Rpc;\n");
             sb.Append("\n");
+            // Aliased rather than imported: the trace enum is the only thing needed from
+            // Sigurn.Rpc.Infrastructure here, and an alias cannot collide with user code.
+            sb.Append($"using RpcTraceOp = Sigurn.Rpc.Infrastructure.RpcTraceOperation;\n");
+            sb.Append("\n");
             sb.Append($"namespace {riti.TypeNamespace}.Rpc.Infrastructure;\n");
             sb.Append("\n");
 
@@ -77,6 +81,72 @@ namespace Sigurn.Rpc.Generator
             sb.Append(GetProxyCode(fullTypeName, riti, context));
 
             context.AddSource($"{riti.TypeName}.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        }
+
+        // "Method13(string, string, System.Threading.CancellationToken)" — the id alone is a
+        // declaration ordinal and says nothing in a log, so traces carry the real signature.
+        private static string GetMethodSignature(TypeMethodInfo m)
+        {
+            var args = string.Join(", ", m.Args.Select(a =>
+            {
+                var modifiers = string.Join(" ", a.Modifiers);
+                return string.IsNullOrEmpty(modifiers) ? $"{a.Symbol.Type}" : $"{modifiers} {a.Symbol.Type}";
+            }));
+
+            return $"{m.Name}({args})";
+        }
+
+        // Names shared by the trace call sites of one generated class.
+        private static StringBuilder GetTraceMetadata(string fullTypeName, RemoteInterfaceTypeInfo riti)
+        {
+            var sb = new StringBuilder();
+
+            sb.Append($"    private const string @__rpcInterfaceName = \"{fullTypeName}\";\n");
+            sb.Append("    protected override string RpcInterfaceName => @__rpcInterfaceName;\n");
+            sb.Append("\n");
+
+            foreach (var p in riti.Properties)
+                sb.Append($"    private const string @__property_{p.Id} = \"{p.Name}\";\n");
+
+            foreach (var m in riti.Methods)
+                sb.Append($"    private const string @__method_{m.Id} = \"{GetMethodSignature(m)}\";\n");
+
+            foreach (var e in riti.Events)
+                sb.Append($"    private const string @__event_{e.Id} = \"{e.Name}\";\n");
+
+            sb.Append("\n");
+
+            return sb;
+        }
+
+        /// <summary>
+        /// Emits <paramref name="body"/> wrapped into entry/exit/failure tracing. The body is
+        /// re-indented one level, so call sites keep building it at their own indentation.
+        /// The failure branch is an exception filter: it logs during the first pass and returns
+        /// false, so the exception is neither caught nor its stack disturbed.
+        /// </summary>
+        private static void AppendTraced(StringBuilder sb, string indent, string operation, string nameConstant, int memberId, StringBuilder body)
+        {
+            sb.Append($"{indent}if (IsTraceEnabled) TraceEnter(RpcTraceOp.{operation}, {nameConstant}, {memberId});\n");
+            sb.Append($"{indent}try\n");
+            sb.Append($"{indent}{{\n");
+
+            var text = body.ToString();
+            if (text.EndsWith("\n"))
+                text = text.Substring(0, text.Length - 1);
+
+            foreach (var line in text.Split('\n'))
+                sb.Append(line.Length == 0 ? "\n" : $"    {line}\n");
+
+            sb.Append($"{indent}}}\n");
+            sb.Append($"{indent}catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOp.{operation}, {nameConstant}, {memberId}))\n");
+            sb.Append($"{indent}{{\n");
+            sb.Append($"{indent}    throw;\n");
+            sb.Append($"{indent}}}\n");
+            sb.Append($"{indent}finally\n");
+            sb.Append($"{indent}{{\n");
+            sb.Append($"{indent}    if (IsTraceEnabled) TraceExit(RpcTraceOp.{operation}, {nameConstant}, {memberId});\n");
+            sb.Append($"{indent}}}\n");
         }
 
         private StringBuilder GetAdapterCode(string fullTypeName, RemoteInterfaceTypeInfo riti, SourceProductionContext context)
@@ -102,6 +172,8 @@ namespace Sigurn.Rpc.Generator
             sb.Append("        _instance = instance;\n");
             sb.Append("    }\n");
             sb.Append("\n");
+
+            sb.Append(GetTraceMetadata(fullTypeName, riti));
 
             var gsb = new StringBuilder();
             var ssb = new StringBuilder();
@@ -153,18 +225,23 @@ namespace Sigurn.Rpc.Generator
                         else
                             gsb.Append($"        else if (propertyId == {p.Id})\n");
                         gsb.Append("        {\n");
+
+                        var gbody = new StringBuilder();
                         if (getIsAuthenticated)
-                            gsb.Append("            CheckAuthenticated();\n");
+                            gbody.Append("            CheckAuthenticated();\n");
                         if (getPerm is not null && getPerm.Length > 0)
                         {
-                            gsb.Append($"            CheckPermissions([ ");
-                            gsb.Append(string.Join(", ", getPerm));
-                            gsb.Append($" ]);\n");
+                            gbody.Append($"            CheckPermissions([ ");
+                            gbody.Append(string.Join(", ", getPerm));
+                            gbody.Append($" ]);\n");
                         }
-                        gsb.Append($"            return await ToBytesAsync<{p.Symbol.Type}>(_instance.{p.Name}, cancellationToken).ConfigureAwait(false)");
+                        gbody.Append($"            return await ToBytesAsync<{p.Symbol.Type}>(_instance.{p.Name}, cancellationToken).ConfigureAwait(false)");
                         if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                            gsb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
-                        gsb.Append(";\n");
+                            gbody.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
+                        gbody.Append(";\n");
+
+                        AppendTraced(gsb, "            ", "PropertyGet", $"@__property_{p.Id}", p.Id, gbody);
+
                         gsb.Append("        }\n");
                         firstGetter = false;
                     }
@@ -182,19 +259,24 @@ namespace Sigurn.Rpc.Generator
                         else
                             ssb.Append($"        else if (propertyId == {p.Id})\n");
                         ssb.Append("        {\n");
+
+                        var sbody = new StringBuilder();
                         if (setIsAuthenticated)
-                            ssb.Append("            CheckAuthenticated();\n");
+                            sbody.Append("            CheckAuthenticated();\n");
                         if (setPerm is not null && setPerm.Length > 0)
                         {
-                            ssb.Append($"            CheckPermissions([ ");
-                            ssb.Append(string.Join(", ", setPerm));
-                            ssb.Append($" ]);\n");
+                            sbody.Append($"            CheckPermissions([ ");
+                            sbody.Append(string.Join(", ", setPerm));
+                            sbody.Append($" ]);\n");
                         }
-                        ssb.Append($"            _instance.{p.Name} = await FromBytesAsync<{p.Symbol.Type}>(value, cancellationToken).ConfigureAwait(false)");
+                        sbody.Append($"            _instance.{p.Name} = await FromBytesAsync<{p.Symbol.Type}>(value, cancellationToken).ConfigureAwait(false)");
                         if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                            ssb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
-                        ssb.Append(";\n");
-                        ssb.Append("            return;\n");
+                            sbody.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
+                        sbody.Append(";\n");
+                        sbody.Append("            return;\n");
+
+                        AppendTraced(ssb, "            ", "PropertySet", $"@__property_{p.Id}", p.Id, sbody);
+
                         ssb.Append("        }\n");
                         firstSetter = false;
                     }
@@ -243,21 +325,26 @@ namespace Sigurn.Rpc.Generator
                         sb.Append($"        else if (methodId == {m.Id})\n");
                     sb.Append("        {\n");
 
+                    var mbody = new StringBuilder();
+
                     if (methodIsAuthenticated)
-                        sb.Append("            CheckAuthenticated();\n\n");
+                        mbody.Append("            CheckAuthenticated();\n\n");
                     if (methodPerm is not null && methodPerm.Length > 0)
                     {
-                        sb.Append($"            CheckPermissions([ ");
-                        sb.Append(string.Join(", ", methodPerm));
-                        sb.Append($" ]);\n");
+                        mbody.Append($"            CheckPermissions([ ");
+                        mbody.Append(string.Join(", ", methodPerm));
+                        mbody.Append($" ]);\n");
                     }
 
-                    var count = m.Args.Where(x => x.Symbol.Type.ToString() != _cancellationTokenName).Count();
+                    // An out parameter has no value on the way in, so the proxy does not send one and
+                    // the adapter must not expect one. It still comes back through the out args.
+                    var count = m.Args.Count(x => x.Symbol.Type.ToString() != _cancellationTokenName
+                        && !x.Modifiers.Contains("out"));
                     if (count != 0)
                     {
-                        sb.Append($"            if (args is null || args.Count != {count})\n");
-                        sb.Append("                throw new ArgumentException(\"Invalid number of arguments\");\n");
-                        sb.Append("\n");
+                        mbody.Append($"            if (args is null || args.Count != {count})\n");
+                        mbody.Append("                throw new ArgumentException(\"Invalid number of arguments\");\n");
+                        mbody.Append("\n");
                     }
 
                     var args = string.Empty;
@@ -270,12 +357,17 @@ namespace Sigurn.Rpc.Generator
                         {
                             argName = "cancellationToken";
                         }
+                        else if (a.Modifiers.Contains("out"))
+                        {
+                            // Declared, not read: the call below is what assigns it.
+                            mbody.Append($"            {a.Symbol.Type} {argName};\n");
+                        }
                         else
                         {
-                            sb.Append($"            var {argName} = await FromBytesAsync<{a.Symbol.Type}>(args[{n++}], cancellationToken).ConfigureAwait(false)");
+                            mbody.Append($"            var {argName} = await FromBytesAsync<{a.Symbol.Type}>(args[{n++}], cancellationToken).ConfigureAwait(false)");
                             if (a.Symbol.Type.IsReferenceType && a.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                                sb.Append($" ?? throw new ArgumentNullException(\"{a.Symbol.Name}\")");
-                            sb.Append(";\n");
+                                mbody.Append($" ?? throw new ArgumentNullException(\"{a.Symbol.Name}\")");
+                            mbody.Append(";\n");
                         }
 
                         if (args != string.Empty)
@@ -292,40 +384,43 @@ namespace Sigurn.Rpc.Generator
 
                     if (m.Symbol.ReturnType.ToString() == "void")
                     {
-                        sb.Append($"            _instance.{m.Name}({args});\n");
+                        mbody.Append($"            _instance.{m.Name}({args});\n");
                         if (outArgs)
                         {
                             var outArgsString = string.Join(", ", m.Args
                                 .Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out"))
                                 .Select(x => $"await ToBytesAsync<{x.Symbol.Type}>(@{x.Symbol.Name}, cancellationToken).ConfigureAwait(false)"));
-                            sb.Append($"            return (Result: null, [{outArgsString}]);\n");
+                            mbody.Append($"            return (Result: null, [{outArgsString}]);\n");
                         }
                     }
                     else if (m.Symbol.ReturnType.ToString() == _taskName)
                     {
-                        sb.Append($"            await _instance.{m.Name}({args}).ConfigureAwait(false);\n");
+                        mbody.Append($"            await _instance.{m.Name}({args}).ConfigureAwait(false);\n");
                     }
                     else if (m.Symbol.ReturnType is INamedTypeSymbol nts &&
                         nts.IsGenericType && nts.ConstructedFrom.ToString() == _genericTaskName)
                     {
-                        sb.Append($"            var @__res = await _instance.{m.Name}({args}).ConfigureAwait(false);\n");
-                        sb.Append($"            return (Result: await ToBytesAsync<{nts.TypeArguments[0]}>(@__res, cancellationToken).ConfigureAwait(false), null);\n");
+                        mbody.Append($"            var @__res = await _instance.{m.Name}({args}).ConfigureAwait(false);\n");
+                        mbody.Append($"            return (Result: await ToBytesAsync<{nts.TypeArguments[0]}>(@__res, cancellationToken).ConfigureAwait(false), null);\n");
                     }
                     else
                     {
-                        sb.Append($"            {m.Symbol.ReturnType} @__res = _instance.{m.Name}({args});\n");
+                        mbody.Append($"            {m.Symbol.ReturnType} @__res = _instance.{m.Name}({args});\n");
                         if (outArgs)
                         {
                             var outArgsString = string.Join(", ", m.Args
                                 .Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out"))
                                 .Select(x => $"await ToBytesAsync<{x.Symbol.Type}>(@{x.Symbol.Name}, cancellationToken).ConfigureAwait(false)"));
-                            sb.Append($"            return (Result: await ToBytesAsync<{m.Symbol.ReturnType}>(@__res, cancellationToken).ConfigureAwait(false), [{outArgsString}]);\n");
+                            mbody.Append($"            return (Result: await ToBytesAsync<{m.Symbol.ReturnType}>(@__res, cancellationToken).ConfigureAwait(false), [{outArgsString}]);\n");
                         }
                         else
                         {
-                            sb.Append($"            return (Result: await ToBytesAsync<{m.Symbol.ReturnType}>(@__res, cancellationToken).ConfigureAwait(false), null);\n");
+                            mbody.Append($"            return (Result: await ToBytesAsync<{m.Symbol.ReturnType}>(@__res, cancellationToken).ConfigureAwait(false), null);\n");
                         }
                     }
+
+                    AppendTraced(sb, "            ", "MethodCall", $"@__method_{m.Id}", m.Id, mbody);
+
                     sb.Append("        }\n");
                     firstMethod = false;
                 }
@@ -385,10 +480,13 @@ namespace Sigurn.Rpc.Generator
                         .ToArray();
                     if (eventArgs.Length != 0)
                     {
-                        ehsb.Append($"        SendEvent({e.Id}");
+                        var rbody = new StringBuilder();
+                        rbody.Append($"        SendEvent({e.Id}");
                         foreach (var ea in eventArgs)
-                            ehsb.Append($", ToBytes<{ea.Symbol.Type}>({ea.Name})");
-                        ehsb.Append(");\n");
+                            rbody.Append($", ToBytes<{ea.Symbol.Type}>({ea.Name})");
+                        rbody.Append(");\n");
+
+                        AppendTraced(ehsb, "        ", "EventRaise", $"@__event_{e.Id}", e.Id, rbody);
                     }
                     ehsb.Append("    }\n");
                     if (firstEvent)
@@ -403,24 +501,30 @@ namespace Sigurn.Rpc.Generator
                     }
                     aesb.Append("            {\n");
                     desb.Append("            {\n");
+
+                    var abody = new StringBuilder();
+                    var dbody = new StringBuilder();
                     if (eventIsAuthenticated)
                     {
-                        aesb.Append("                CheckAuthenticated();\n");
-                        desb.Append("                CheckAuthenticated();\n");
+                        abody.Append("                CheckAuthenticated();\n");
+                        dbody.Append("                CheckAuthenticated();\n");
                     }
                     if (eventPerm is not null && eventPerm.Length > 0)
                     {
-                        aesb.Append($"                CheckPermissions([ ");
-                        aesb.Append(string.Join(", ", eventPerm));
-                        aesb.Append($" ]);\n");
+                        abody.Append($"                CheckPermissions([ ");
+                        abody.Append(string.Join(", ", eventPerm));
+                        abody.Append($" ]);\n");
 
-                        desb.Append($"                CheckPermissions([ ");
-                        desb.Append(string.Join(", ", eventPerm));
-                        desb.Append($" ]);\n");
+                        dbody.Append($"                CheckPermissions([ ");
+                        dbody.Append(string.Join(", ", eventPerm));
+                        dbody.Append($" ]);\n");
                     }
 
-                    aesb.Append($"                _instance.{e.Name} += On{e.Name};\n");
-                    desb.Append($"                _instance.{e.Name} -= On{e.Name};\n");
+                    abody.Append($"                _instance.{e.Name} += On{e.Name};\n");
+                    dbody.Append($"                _instance.{e.Name} -= On{e.Name};\n");
+
+                    AppendTraced(aesb, "                ", "EventAttach", $"@__event_{e.Id}", e.Id, abody);
+                    AppendTraced(desb, "                ", "EventDetach", $"@__event_{e.Id}", e.Id, dbody);
 
                     aesb.Append("            }\n");
                     desb.Append("            }\n");
@@ -477,6 +581,8 @@ namespace Sigurn.Rpc.Generator
             sb.Append("    }\n");
             sb.Append("\n");
 
+            sb.Append(GetTraceMetadata(fullTypeName, riti));
+
             if (riti.Properties.Count != 0)
             {
                 foreach (var p in riti.Properties)
@@ -486,16 +592,28 @@ namespace Sigurn.Rpc.Generator
                     sb.Append("    {\n");
                     if (p.Symbol.GetMethod is not null)
                     {
-                        sb.Append($"        get => GetProperty<{p.Symbol.Type}>({p.Id})");
+                        var gbody = new StringBuilder();
+                        gbody.Append($"            return GetProperty<{p.Symbol.Type}>({p.Id})");
                         if (p.Symbol.Type.IsReferenceType && p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
                         // if (p.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                            sb.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
-                        sb.Append(";\n");
+                            gbody.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
+                        gbody.Append(";\n");
+
+                        sb.Append("        get\n");
+                        sb.Append("        {\n");
+                        AppendTraced(sb, "            ", "PropertyGet", $"@__property_{p.Id}", p.Id, gbody);
+                        sb.Append("        }\n");
                     }
 
                     if (p.Symbol.SetMethod is not null)
                     {
-                        sb.Append($"        set => SetProperty<{p.Symbol.Type}>({p.Id}, value);\n");
+                        var sbody = new StringBuilder();
+                        sbody.Append($"            SetProperty<{p.Symbol.Type}>({p.Id}, value);\n");
+
+                        sb.Append("        set\n");
+                        sb.Append("        {\n");
+                        AppendTraced(sb, "            ", "PropertySet", $"@__property_{p.Id}", p.Id, sbody);
+                        sb.Append("        }\n");
                     }
                     sb.Append("    }\n");
                     sb.Append("\n");
@@ -526,27 +644,30 @@ namespace Sigurn.Rpc.Generator
                         .Any(a => a.AttributeClass?.ToDisplayString() == _noRpcTimeoutAttributeName);
                     if (noTimeout)
                         sb.Append("        using var @_noTimeout = new Sigurn.Rpc.RpcContext { Timeout = System.Threading.Timeout.InfiniteTimeSpan };\n");
+                    var pbody = new StringBuilder();
                     bool args = false;
-                    bool outArgs = false;
+                    // Includes out parameters even though they are not sent: they still come back.
+                    bool outArgs = m.Args.Any(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out"));
                     string? cancellationToken = m.Args
                         .Where(x => x.Symbol.Type.ToString() == _cancellationTokenName)
                         .Select(x => x.Name)
                         .FirstOrDefault() ?? $"{_cancellationTokenName}.None";
+                    // An out parameter is unassigned at this point, so there is nothing to serialize
+                    // and nothing the server could use — it is left out of the request.
                     var realArgs = m.Args
-                        .Where(x => x.Symbol.Type.ToString() != _cancellationTokenName)
+                        .Where(x => x.Symbol.Type.ToString() != _cancellationTokenName
+                            && !x.Modifiers.Contains("out"))
                         .ToArray();
                     if (realArgs.Any())
                     {
-                        sb.Append("        IReadOnlyList<byte[]> @args =\n");
-                        sb.Append("        [\n");
+                        pbody.Append("        IReadOnlyList<byte[]> @args =\n");
+                        pbody.Append("        [\n");
 
                         foreach (var a in realArgs)
-                        {
-                            if (a.Modifiers.Contains("ref") || a.Modifiers.Contains("out")) outArgs = true;
-                            sb.Append($"            ToBytes<{a.Symbol.Type}>({a.Symbol.Name}),\n");
-                        }
-                        sb.Append("        ];\n");
-                        sb.Append("\n");
+                            pbody.Append($"            ToBytes<{a.Symbol.Type}>({a.Symbol.Name}),\n");
+
+                        pbody.Append("        ];\n");
+                        pbody.Append("\n");
                         args = true;
                     }
                     var argsText = args ? "@args" : "[]";
@@ -554,13 +675,13 @@ namespace Sigurn.Rpc.Generator
                     {
                         var resText = outArgs ? "var (_, @outArgs) = " : "";
                         bool oneWay = !outArgs && m.oneWay;
-                        sb.Append($"        {resText}InvokeMethod({m.Id}, {argsText}, {oneWay.ToString().ToLower()});\n");
+                        pbody.Append($"        {resText}InvokeMethod({m.Id}, {argsText}, {oneWay.ToString().ToLower()});\n");
 
                         if (outArgs)
                         {
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
-                                sb.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}]);\n");
+                                pbody.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}]);\n");
                         }
                     }
                     else if (m.Symbol.ReturnType.ToString() == _taskName)
@@ -568,52 +689,55 @@ namespace Sigurn.Rpc.Generator
                         var resText = outArgs ? "var (_, @outArgs) = " : "";
                         bool oneWay = !outArgs && m.oneWay;
 
-                        sb.Append($"        {resText} await InvokeMethodAsync({m.Id}, {argsText}, {oneWay.ToString().ToLower()}, {cancellationToken}).ConfigureAwait(false);\n");
+                        pbody.Append($"        {resText} await InvokeMethodAsync({m.Id}, {argsText}, {oneWay.ToString().ToLower()}, {cancellationToken}).ConfigureAwait(false);\n");
 
                         if (outArgs)
                         {
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
                             {
-                                sb.Append($"        {oa.Name} = await FromBytesAsync<{oa.Symbol.Type}>(@outArgs[{an++}], {cancellationToken}).ConfigureAwait(false)");
+                                pbody.Append($"        {oa.Name} = await FromBytesAsync<{oa.Symbol.Type}>(@outArgs[{an++}], {cancellationToken}).ConfigureAwait(false)");
                                 if (oa.Symbol.Type.IsReferenceType && oa.Symbol.Type.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                                    sb.Append($" ?? throw new InvalidOperationException(\"Output argument '{oa.Symbol.Name}' value cannot be null\")");
-                                sb.Append(";\n");
+                                    pbody.Append($" ?? throw new InvalidOperationException(\"Output argument '{oa.Symbol.Name}' value cannot be null\")");
+                                pbody.Append(";\n");
                             }
                         }
                     }
                     else if (m.Symbol.ReturnType is INamedTypeSymbol nts &&
                         nts.IsGenericType && nts.ConstructedFrom.ToString() == _genericTaskName)
                     {
-                        sb.Append($"        var (@res, _) = await InvokeMethodAsync({m.Id}, {argsText}, false, {cancellationToken}).ConfigureAwait(false);\n");
-                        sb.Append($"        return await FromBytesAsync<{nts.TypeArguments[0]}>(@res, {cancellationToken}).ConfigureAwait(false)");
+                        pbody.Append($"        var (@res, _) = await InvokeMethodAsync({m.Id}, {argsText}, false, {cancellationToken}).ConfigureAwait(false);\n");
+                        pbody.Append($"        return await FromBytesAsync<{nts.TypeArguments[0]}>(@res, {cancellationToken}).ConfigureAwait(false)");
                         if (nts.TypeArguments[0].IsReferenceType && nts.TypeArguments[0].NullableAnnotation == NullableAnnotation.NotAnnotated)
-                            sb.Append(" ?? throw new InvalidOperationException(\"Method return value cannot be null.\")");
-                        sb.Append(";\n");
+                            pbody.Append(" ?? throw new InvalidOperationException(\"Method return value cannot be null.\")");
+                        pbody.Append(";\n");
                     }
                     else
                     {
                         var resText = outArgs ? "(@res, @outArgs)" : "(res, _)";
-                        sb.Append($"        var {resText} = InvokeMethod({m.Id}, {argsText}, false);\n");
-                        sb.Append("\n");
+                        pbody.Append($"        var {resText} = InvokeMethod({m.Id}, {argsText}, false);\n");
+                        pbody.Append("\n");
                         if (outArgs)
                         {
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
                             {
-                                sb.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}])");
+                                pbody.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}])");
                                 if (oa.Symbol.Type.IsReferenceType && oa.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                                    sb.Append($" ?? throw new InvalidOperationException(\"Output value for argument '{oa.Symbol.Name}' cannot be null.\")");
-                                sb.Append(";\n");
+                                    pbody.Append($" ?? throw new InvalidOperationException(\"Output value for argument '{oa.Symbol.Name}' cannot be null.\")");
+                                pbody.Append(";\n");
                             }
-                            sb.Append("\n");
+                            pbody.Append("\n");
                         }
 
-                        sb.Append($"        return FromBytes<{m.Symbol.ReturnType}>(@res)");
+                        pbody.Append($"        return FromBytes<{m.Symbol.ReturnType}>(@res)");
                         if (m.Symbol.ReturnType.IsReferenceType && m.Symbol.ReturnNullableAnnotation == NullableAnnotation.NotAnnotated)
-                            sb.Append(" ?? throw new InvalidOperationException(\"Method return value cannot be null.\")");
-                        sb.Append(";\n");
+                            pbody.Append(" ?? throw new InvalidOperationException(\"Method return value cannot be null.\")");
+                        pbody.Append(";\n");
                     }
+
+
+                    AppendTraced(sb, "        ", "MethodCall", $"@__method_{m.Id}", m.Id, pbody);
 
                     sb.Append("    }\n");
                     sb.Append("\n");
@@ -631,15 +755,21 @@ namespace Sigurn.Rpc.Generator
                     sb.Append($"    private {e.Symbol.Type}? _{e.Name};\n");
                     sb.Append($"    event {e.Symbol.Type} {fullTypeName}.{e.Name}\n");
                     sb.Append("    {\n");
+                    var abody = new StringBuilder();
+                    abody.Append($"            _{e.Name} += value;\n");
+                    abody.Append($"            AttachEventHandler({e.Id});\n");
+
+                    var dbody = new StringBuilder();
+                    dbody.Append($"            _{e.Name} -= value;\n");
+                    dbody.Append($"            DetachEventHandler({e.Id});\n");
+
                     sb.Append($"        add\n");
                     sb.Append("        {\n");
-                    sb.Append($"            _{e.Name} += value;\n");
-                    sb.Append($"            AttachEventHandler({e.Id});\n");
+                    AppendTraced(sb, "            ", "EventAttach", $"@__event_{e.Id}", e.Id, abody);
                     sb.Append("        }\n");
                     sb.Append($"        remove\n");
                     sb.Append("        {\n");
-                    sb.Append($"            _{e.Name} -= value;\n");
-                    sb.Append($"            DetachEventHandler({e.Id});\n");
+                    AppendTraced(sb, "            ", "EventDetach", $"@__event_{e.Id}", e.Id, dbody);
                     sb.Append("        }\n");
                     sb.Append("    }\n");
                     sb.Append("\n");
@@ -649,25 +779,30 @@ namespace Sigurn.Rpc.Generator
                     else
                         ehsp.Append($"        else if (eventId == {e.Id})\n");
                     ehsp.Append("        {\n");
-                    ehsp.Append($"            _{e.Name}?.Invoke(");
+
+                    var rbody = new StringBuilder();
+                    rbody.Append($"            _{e.Name}?.Invoke(");
                     int an = 0;
                     bool firstArg = true;
                     foreach (var a in e.Args)
                     {
                         if (!firstArg)
-                            ehsp.Append(", ");
+                            rbody.Append(", ");
                         if (a.Symbol.Type.ToString().StartsWith("object") && a.Name == "sender")
-                            ehsp.Append("this");
+                            rbody.Append("this");
                         else
                         {
-                            ehsp.Append($"FromBytes<{a.Symbol.Type}>(args[{an}])");
+                            rbody.Append($"FromBytes<{a.Symbol.Type}>(args[{an}])");
                             if (a.Symbol.Type.IsReferenceType && a.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                                ehsp.Append($" ?? throw new ArgumentNullException(\"{a.Symbol.Name}\")");
+                                rbody.Append($" ?? throw new ArgumentNullException(\"{a.Symbol.Name}\")");
                             an++;
                         }
                         firstArg = false;
                     }
-                    ehsp.Append(");\n");
+                    rbody.Append(");\n");
+
+                    AppendTraced(ehsp, "            ", "EventRaise", $"@__event_{e.Id}", e.Id, rbody);
+
                     ehsp.Append("        }\n");
                     firstEvent = false;
                 }

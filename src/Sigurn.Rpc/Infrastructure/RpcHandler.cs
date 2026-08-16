@@ -189,7 +189,8 @@ class RpcHandler : IDisposable
         }
         catch (TimeoutException)
         {
-            _logger.LogTrace("RequestAsync {RequestId} TIMED OUT after {Timeout}", packet.RequestId, timeout);
+            if (_logger.IsEnabled(LogLevel.Trace))
+                _logger.LogTrace("RequestAsync {RequestId} TIMED OUT after {Timeout}", packet.RequestId, timeout);
             throw;
         }
         finally
@@ -250,15 +251,14 @@ class RpcHandler : IDisposable
             // Transport-level failures keep the best-effort contract of a release: the remote session
             // is gone (or going), and it tears its adapters down on its own. Failures reported *by*
             // the remote disposal itself are not caught here — they surface to the caller.
-            _logger.LogDebug(ex, "Release of instance {InstanceId} was not confirmed", instanceId);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Release of instance {InstanceId} was not confirmed", instanceId);
         }
     }
 
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(Guid instanceId, int methodId, IReadOnlyList<byte[]> args, bool oneWay, CancellationToken cancellationToken)
     {
-        if (_logger.IsEnabled(LogLevel.Trace))
-            _logger.LogTrace("Invoking remote method {MethodId} on {InstanceId}", methodId, instanceId);
-
+        // The call itself is traced by the proxy, which knows the interface and member names.
         var request = new MethodCallPacket
         {
             InstanceId = instanceId,
@@ -347,7 +347,8 @@ class RpcHandler : IDisposable
     private void OnChannelFaulted(object? sender, EventArgs args)
     {
         var requests = _requests.ToArray();
-        _logger.LogTrace("OnChannelFaulted fired: cancelling {Count} pending requests", requests.Length);
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace("OnChannelFaulted fired: cancelling {Count} pending requests", requests.Length);
         _requests.Clear();
 
         foreach(var kvp in requests)
@@ -370,7 +371,8 @@ class RpcHandler : IDisposable
             catch (ObjectDisposedException ex)
             {
                 // The source may have already been disposed by the handling loop cleanup.
-                _logger.LogDebug(ex, "Cancellation source already disposed while cancelling pending request");
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(ex, "Cancellation source already disposed while cancelling pending request");
             }
         }
     }
@@ -398,7 +400,8 @@ class RpcHandler : IDisposable
         }
         catch(TimeoutException ex)
         {
-            _logger.LogDebug(ex, "Timed out waiting for the packet handling loop to stop");
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Timed out waiting for the packet handling loop to stop");
         }
         finally
         {
@@ -436,7 +439,7 @@ class RpcHandler : IDisposable
                             if (state is RpcPacket packet)
                                 tcs.TrySetResult(packet);
                         }, request);
-                    else
+                    else if (_logger.IsEnabled(LogLevel.Debug))
                         _logger.LogDebug("Dropping orphan response {PacketType} for request {RequestId}",
                             request.GetType().Name, request.RequestId);
                     continue;
@@ -454,7 +457,8 @@ class RpcHandler : IDisposable
                     // A request with the same id is already in flight — drop this duplicate and
                     // release the just-created source instead of leaking it.
                     requestCancellationToken.Dispose();
-                    _logger.LogDebug("Duplicate request id {RequestId}; dropping packet", request.RequestId);
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                        _logger.LogDebug("Duplicate request id {RequestId}; dropping packet", request.RequestId);
                     continue;
                 }
 
@@ -469,7 +473,8 @@ class RpcHandler : IDisposable
                         RpcPacket? answer = null;
                         if (t.IsFaulted)
                         {
-                            _logger.LogTrace(t.Exception, "Method call handler faulted for request {RequestId}", request.RequestId);
+                            if (_logger.IsEnabled(LogLevel.Trace))
+                                _logger.LogTrace(t.Exception, "Method call handler faulted for request {RequestId}", request.RequestId);
                             answer = new ExceptionPacket(request, t.Exception);
                         }
                         else if (t.IsCompletedSuccessfully)
@@ -491,7 +496,8 @@ class RpcHandler : IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Error during RPC packet handling");
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(ex, "Error during RPC packet handling");
 
                 if (cancellationToken.IsCancellationRequested) break;
 

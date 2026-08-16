@@ -437,7 +437,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Dropped event {EventId} for instance {InstanceId}: channel unavailable", e.EventId, id);
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(ex, "Dropped event {EventId} for instance {InstanceId}: channel unavailable", e.EventId, id);
             }
         };
 
@@ -453,7 +454,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
 
         if (_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Instance registered: {InstanceId} ({InstanceType})", id, instance.Value.GetType().Name);
+            _logger.LogInformation("Instance registered: {InstanceId} interface={Interface} type={InstanceType}",
+                id, GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
 
         if (instance.Value is ISessionsAware sas)
             sas.AttachSession(this);
@@ -511,7 +513,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
         catch (ObjectDisposedException ex)
         {
-            _logger.LogDebug(ex, "Adapter already disposed during cleanup");
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Adapter already disposed during cleanup");
             return;
         }
 
@@ -528,9 +531,29 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "DetachSession failed during adapter cleanup");
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(ex, "DetachSession failed during adapter cleanup");
             }
         }
+    }
+
+    // An adapter always knows the interface it exposes and the object behind it; both are what makes
+    // an instance id in the log identifiable. A target that is not an adapter (or one already torn
+    // down) still gets a usable name instead of aborting the log call.
+    private static string GetInterfaceName(ICallTarget target)
+    {
+        if (target is InterfaceAdapter adapter)
+            return adapter.InterfaceType.FullName ?? adapter.InterfaceType.Name;
+
+        return target.GetType().FullName ?? target.GetType().Name;
+    }
+
+    private static string GetInstanceTypeName(ICallTarget target)
+    {
+        if (target is InterfaceAdapter adapter)
+            return adapter.InstanceType.FullName ?? adapter.InstanceType.Name;
+
+        return target.GetType().FullName ?? target.GetType().Name;
     }
 
     // Releasing an exposed instance disposes the wrapped object when the last reference goes, and the
@@ -548,7 +571,19 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _adapterEventHandlers.Remove(instanceId, out handler);
         }
 
-        _logger.LogInformation("Instance released: {InstanceId}", instanceId);
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            // Read the names before the reference is released — after that the adapter is gone.
+            try
+            {
+                _logger.LogInformation("Instance released: {InstanceId} interface={Interface} type={InstanceType}",
+                    instanceId, GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger.LogInformation("Instance released: {InstanceId}", instanceId);
+            }
+        }
 
         CleanupAdapter(instance, handler);
 
@@ -577,6 +612,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 if (restorable)
                     lock (_restorableInstances)
                         _restorableInstances[instanceId] = serviceInstance;
+
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Proxy created: {InstanceId} interface={Interface}",
+                        instanceId, type.FullName ?? type.Name);
             }
 
             return InterfaceProxy.CreateProxy(instanceId, type, proxyRef, SerializationContext);
@@ -681,9 +720,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 }
                 else if (request is MethodCallPacket mcp)
                 {
-                    if (_logger.IsEnabled(LogLevel.Trace))
-                        _logger.LogTrace("Method call: instance {InstanceId} method {MethodId}", mcp.InstanceId, mcp.MethodId);
-
+                    // The dispatch itself is traced by the adapter, which knows the interface and
+                    // member names.
                     var instance = GetAdapter(mcp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
@@ -755,7 +793,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogTrace(ex, "Request handling failed: {Request}", request);
+            if (_logger.IsEnabled(LogLevel.Trace))
+                _logger.LogTrace(ex, "Request handling failed: {Request}", request);
             if (request is null) return null;
             if (request is MethodCallPacket mcp && mcp.OneWay) return null;
             return new ExceptionPacket(request, ex);
@@ -821,7 +860,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Session restore failed after channel reopen: {SessionId}", Id);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Session restore failed after channel reopen: {SessionId}", Id);
         }
     }
 
@@ -833,7 +873,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to restore instance of type {Type}", instance.InterfaceType);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(ex, "Failed to restore instance of type {Type}", instance.InterfaceType);
         }
     }
 }

@@ -55,7 +55,9 @@ dotnet test src/Sigurn.Rpc.IntegrationTests/
 
 ### Source Generator
 
-`RpcGenerator.cs` is an `IIncrementalGenerator` that detects `[RemoteInterface]` attributes and emits `<InterfaceName>Adapter` and `<InterfaceName>Proxy` partial classes. Verify snapshot tests in `Sigurn.Rpc.Tests/` use `.verified.txt` files to assert generated output.
+`RpcGenerator.cs` is an `IIncrementalGenerator` that detects `[RemoteInterface]` attributes and emits sealed `<InterfaceName>_Adapter` and `<InterfaceName>_Proxy` classes into `<Namespace>.Rpc.Infrastructure`. Verify snapshot tests in `Sigurn.Rpc.Tests/` use `.verified.cs` files to assert generated output.
+
+The generated members carry tracing: each dispatch branch and each proxy member is wrapped into `TraceEnter` / `TraceExit` / `TraceFailure` calls (declared on `InterfaceAdapter` and `InterfaceProxy`) that log the full interface and member name alongside the numeric member id. Every call site is guarded by `IsTraceEnabled`, so nothing is computed when trace logging is off. `Sigurn.Rpc.Tests` does not run the generator (it registers hand-written adapters/proxies for the same interfaces); generated code is compiled and exercised by `Sigurn.Rpc.TestProcess` and `Sigurn.Rpc.IntegrationTests`.
 
 ### Integration Tests
 

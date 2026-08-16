@@ -181,14 +181,15 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
         {
             try
             {
-                if (!Task.Run(() => ad.DisposeAsync().AsTask()).Wait(_syncDisposeTimeout))
+                if (!Task.Run(() => ad.DisposeAsync().AsTask()).Wait(_syncDisposeTimeout) && _logger.IsEnabled(LogLevel.Debug))
                     _logger.LogDebug("Asynchronous disposal of {InstanceType} did not complete within {Timeout}",
-                        _instance.GetType().Name, _syncDisposeTimeout);
+                        _instance.GetType().FullName, _syncDisposeTimeout);
             }
             catch (Exception ex)
             {
                 // Best effort: a faulting service must not abort teardown.
-                _logger.LogDebug(ex, "Asynchronous disposal of {InstanceType} failed", _instance.GetType().Name);
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(ex, "Asynchronous disposal of {InstanceType} failed", _instance.GetType().FullName);
             }
 
             return;
@@ -198,6 +199,53 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     }
 
     public Type InterfaceType { get; }
+
+    /// <summary>Runtime type of the wrapped service instance.</summary>
+    internal Type InstanceType => _instance.GetType();
+
+    /// <summary>
+    /// Full name of the remote interface, used in trace messages. Generated adapters override it
+    /// with a compile time constant.
+    /// </summary>
+    protected virtual string RpcInterfaceName => InterfaceType.FullName ?? InterfaceType.Name;
+
+    /// <summary>
+    /// True when trace logging is on. Call sites check it before building trace arguments so that
+    /// nothing is computed when the level is off.
+    /// </summary>
+    protected static bool IsTraceEnabled => _logger.IsEnabled(LogLevel.Trace);
+
+    /// <summary>Traces the start of a dispatched member access.</summary>
+    protected void TraceEnter(RpcTraceOperation operation, string member, int memberId)
+    {
+        if (!_logger.IsEnabled(LogLevel.Trace)) return;
+
+        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] session={SessionId}",
+            operation, RpcInterfaceName, member, memberId, Session.Current?.Id);
+    }
+
+    /// <summary>Traces the end of a dispatched member access.</summary>
+    protected void TraceExit(RpcTraceOperation operation, string member, int memberId)
+    {
+        if (!_logger.IsEnabled(LogLevel.Trace)) return;
+
+        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] session={SessionId}",
+            operation, RpcInterfaceName, member, memberId, Session.Current?.Id);
+    }
+
+    /// <summary>
+    /// Traces a failed member dispatch and always returns false, so it can be used as an exception
+    /// filter (<c>catch (Exception ex) when (TraceFailure(ex, ...))</c>). The filter runs during the
+    /// first pass, which logs the failure without catching it or unwinding the stack.
+    /// </summary>
+    protected bool TraceFailure(Exception exception, RpcTraceOperation operation, string member, int memberId)
+    {
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] session={SessionId} FAILED",
+                operation, RpcInterfaceName, member, memberId, Session.Current?.Id);
+
+        return false;
+    }
 
     protected SerializationContext Context
     {
@@ -357,7 +405,8 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
                 catch (Exception ex)
                 {
                     // Best effort: a faulting handler must not abort teardown.
-                    _logger.LogDebug(ex, "Detaching event {EventId} failed during session teardown", eventId);
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                        _logger.LogDebug(ex, "Detaching event {EventId} failed during session teardown", eventId);
                 }
             }
         }
