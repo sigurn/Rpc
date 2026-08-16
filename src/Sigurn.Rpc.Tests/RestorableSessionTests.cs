@@ -710,6 +710,64 @@ public class RestorableSessionTests
     }
 
     [Fact(Timeout = 20000)]
+    public async Task Reopen_DisposesOwnedAsyncDisposablePassedToServer()
+    {
+        var tcpHost = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<IAsyncResourceService>(ShareWithin.Session, () => new AsyncResourceService());
+        sh.Start();
+
+        await using var client = NewClient(tcpHost);
+        await client.OpenAsync(CurrentToken);
+        var service = await client.GetService<IAsyncResourceService>(CurrentToken);
+
+        var resource = new TrackedAsyncResource();
+        service.TakeResource(resource); // server retains the proxy for it
+
+        sh.Stop();
+        sh.Start();
+
+        // On reopen the client's exposed adapter is torn down; an owned instance is disposed
+        // asynchronously, without any remote DisposeAsync call.
+        Assert.True(resource.Disposed.Wait(TimeSpan.FromSeconds(10), CurrentToken),
+            "Owned IAsyncDisposable passed to the server was not disposed on reopen");
+        Assert.Equal(1, resource.DisposeAsyncCount);
+
+        sh.Stop();
+        tcpHost.Close();
+    }
+
+    [Fact(Timeout = 20000)]
+    public async Task Reopen_DoesNotDisposeNoDisposeAsyncDisposablePassedToServer()
+    {
+        var tcpHost = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };
+        var sh = new ServiceHost(tcpHost);
+        sh.RegisterSerive<IAsyncResourceService>(ShareWithin.Session, () => new AsyncResourceService());
+        sh.Start();
+
+        await using var client = NewClient(tcpHost);
+        await client.OpenAsync(CurrentToken);
+        var service = await client.GetService<IAsyncResourceService>(CurrentToken);
+
+        var resource = new TrackedAsyncResource();
+        service.TakeResource(RpcInterface.NoDispose<IAsyncDisposable>(resource)); // borrowed — keep ownership
+
+        sh.Stop();
+        sh.Start();
+        Assert.True(WaitUntil(() =>
+        {
+            try { return !service.IsSubscribed() || true; }
+            catch { return false; }
+        }, TimeSpan.FromSeconds(10)), "Root proxy did not recover after reopen");
+
+        Thread.Sleep(200);
+        Assert.False(resource.Disposed.IsSet, "Borrowed IAsyncDisposable passed to the server was disposed on reopen");
+
+        sh.Stop();
+        tcpHost.Close();
+    }
+
+    [Fact(Timeout = 20000)]
     public async Task Reopen_DoesNotDisposeNoDisposeInterfacePassedToServer()
     {
         var tcpHost = new TcpHost { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) };

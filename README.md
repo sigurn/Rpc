@@ -511,6 +511,47 @@ host.RegisterSerive<ILogService>(
 );
 ```
 
+### Disposable Resources (`IAsyncDisposable`)
+
+`System.IAsyncDisposable` can be marshaled like any remote interface: return it from a method, pass it
+as an argument, or put it in a field of a serialized object. The typical use is a handle the caller
+disposes to release something on the other side — an unsubscribe handle, for example:
+
+```csharp
+[RemoteInterface]
+public interface INotificationService
+{
+    IAsyncDisposable Subscribe(INotificationHandler handler);
+}
+
+// Server
+public IAsyncDisposable Subscribe(INotificationHandler handler)
+{
+    _handlers.Add(handler);
+    return new Subscription(() => _handlers.Remove(handler));  // implements IAsyncDisposable
+}
+
+// Client
+await using var subscription = await service.Subscribe(handler);
+// ... on leaving the block the server-side Subscription is disposed and the handler unsubscribed
+```
+
+How it works, and what it guarantees:
+
+- **No remote call is made for `DisposeAsync`.** Disposing the proxy releases the reference, and the
+  owner of the object disposes it — so the object's `DisposeAsync` runs exactly once, never twice.
+- **`await` means done.** Awaiting `DisposeAsync()` returns after the remote side has actually
+  disposed the object, so a subscription is guaranteed to be gone once the await completes. An
+  exception thrown by the remote `DisposeAsync` surfaces to the caller as `RpcServerException`.
+- **Disposal follows the last reference.** If the same object is marshaled more than once, only
+  releasing the last proxy disposes it.
+- **A lost connection disposes it too.** When the connection is closed or breaks, everything the
+  session exposed is released and disposed — you never need a remote call to clean up.
+- **An object that implements both contracts** is disposed through `DisposeAsync`; `Dispose` is used
+  only when the object does not offer asynchronous disposal.
+- **Keeping ownership**: pass the instance through `RpcInterface.NoDispose(instance)` and the RPC
+  layer will release the reference without disposing the object.
+
 ### Session Management
 
 #### Server-Side Session Access

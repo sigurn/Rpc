@@ -8,9 +8,17 @@ class InterfaceSerializer : IGeneralSerializer
     public bool IsTypeSupported(Type type)
     {
         if (!type.IsInterface) return false;
-        var attr = type.GetCustomAttribute<RemoteInterfaceAttribute>();
-        if (attr is null) return false;
 
+        // IAsyncDisposable is a BCL type and cannot carry [RemoteInterface], yet it is marshaled by
+        // reference like any other remote interface: it travels as an instance id and is released —
+        // not method-called — through the instance-release path. This is deliberately an explicit
+        // special case: every other interface still needs the attribute, so an arbitrary interface
+        // that merely has an adapter and a proxy registered is still rejected.
+        if (type != typeof(IAsyncDisposable))
+        {
+            var attr = type.GetCustomAttribute<RemoteInterfaceAttribute>();
+            if (attr is null) return false;
+        }
         return InterfaceAdapter.IsThereAdapterFor(type) && InterfaceProxy.IsThereProxyFor(type);
     }
 

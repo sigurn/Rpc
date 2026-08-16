@@ -290,7 +290,10 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
             _logger.LogError(ex, "Disconnected event failed");
         }
 
-        session.Dispose();
+        // Asynchronous teardown: a disconnect must release everything this session exposed, and an
+        // instance that offers asynchronous disposal gets its DisposeAsync awaited here. This runs on
+        // a dedicated thread-pool work item (see the Closed/Faulted hooks), so blocking on it is safe.
+        session.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private static RefCounter<ICallTarget> CreateInstance(Type type, Func<ICallTarget> factory, Dictionary<Type, RefCounter<ICallTarget>> storage)
@@ -303,8 +306,18 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
                 {
                     lock (storage)
                         storage.Remove(type);
- 
+
                     if (x is IDisposable d) d.Dispose();
+                },
+                async x =>
+                {
+                    lock (storage)
+                        storage.Remove(type);
+
+                    if (x is IAsyncDisposable ad)
+                        await ad.DisposeAsync().ConfigureAwait(false);
+                    else if (x is IDisposable d)
+                        d.Dispose();
                 });
                 storage.Add(type, refCounter);
             }

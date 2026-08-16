@@ -49,15 +49,21 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
     private volatile int _isDisposed = 0;
 
+    // The RpcHandler starts receiving as soon as it is created and dispatches requests to OnRequest on
+    // other threads, so it is always created LAST: everything the request path needs — above all the
+    // serialization context — must be in place first. A request arriving in that window would otherwise
+    // serialize with a missing context, which Sigurn.Serialize silently replaces with the default one,
+    // and marshaling an interface or a stream fails with "Cannot find serializer for type ...".
     internal Session(IChannel channel)
     {
         _channel = channel;
         _host = null;
-        _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
-        _logger.LogInformation("Session created: {SessionId}", Id);
 
         InterfaceProxy.InstanceDestroyed += OnProxyDestroyed;
+
+        _handler = new RpcHandler(channel, OnRequest);
+        _logger.LogInformation("Session created: {SessionId}", Id);
 
         // Client sessions restore their state when the restorable channel reconnects. Restore is driven by
         // RpcClient through the channel's pre-Opened initialize slot (see RestoreAfterReopenAsync) rather
@@ -68,8 +74,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     {
         _channel = channel;
         _host = host;
-        _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+
+        _handler = new RpcHandler(channel, OnRequest);
         _logger.LogInformation("Session created: {SessionId}", Id);
     }
 
@@ -78,8 +85,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _channel = channel;
         _host = host;
         _serviceHost = serviceHost;
-        _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+
+        _handler = new RpcHandler(channel, OnRequest);
         _logger.LogInformation("Session created: {SessionId}", Id);
     }
 
@@ -88,8 +96,9 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         _channel = channel;
         _host = null;
         _serviceHost = serviceHost;
-        _handler = new RpcHandler(channel, OnRequest);
         _context = new RpcSerializationContext(this);
+
+        _handler = new RpcHandler(channel, OnRequest);
         _logger.LogInformation("Session created: {SessionId}", Id);
     }
 
@@ -144,7 +153,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         await DisposeInstances(instances).ConfigureAwait(false);
 
-        TeardownExposedAdapters();
+        await TeardownExposedAdaptersAsync().ConfigureAwait(false);
 
         lock (_sessionInstances)
         {
@@ -152,7 +161,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             _sessionInstances.Clear();
         }
 
-        await DisposeInstances(instances).ConfigureAwait(false);
+        // Session-scoped services are adapters: dispose them asynchronously so a service that only
+        // offers DisposeAsync is released properly when the connection goes away.
+        foreach (var instance in instances)
+            await instance.DisposeAsync().ConfigureAwait(false);
 
         if (_channel is IAsyncDisposable ad)
             await ad.DisposeAsync().ConfigureAwait(false);
@@ -165,6 +177,21 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     // gone and would never send a ReleaseInstancePacket for them. Whether the wrapped object is
     // disposed is governed by the adapter's ownership flag (see RpcInterface.NoDispose).
     private void TeardownExposedAdapters()
+    {
+        foreach (var counter in DetachExposedAdapters())
+            counter.Release();
+    }
+
+    // Asynchronous twin, used when the session is torn down asynchronously (a disconnect, or an
+    // explicit DisposeAsync): an exposed instance that offers asynchronous disposal gets its
+    // DisposeAsync awaited instead of bridged onto the calling thread.
+    private async ValueTask TeardownExposedAdaptersAsync()
+    {
+        foreach (var counter in DetachExposedAdapters())
+            await counter.ReleaseAsync().ConfigureAwait(false);
+    }
+
+    private IReadOnlyList<RefCounter<ICallTarget>> DetachExposedAdapters()
     {
         KeyValuePair<Guid, RefCounter<ICallTarget>>[] adapters;
         Dictionary<Guid, EventHandler<EventDataArgs>> handlers;
@@ -181,12 +208,11 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         foreach (var (id, counter) in adapters)
             CleanupAdapter(counter, handlers.GetValueOrDefault(id));
 
-        // Adapters were AddRef'd in RegisterInstance, so release them symmetrically.
-        // A shared (Host/Process) instance lives as one RefCounter across every
-        // session, so disposing it directly here would destroy it while other
-        // sessions still hold references — Release disposes only at the last one.
-        foreach (var (_, counter) in adapters)
-            counter.Release();
+        // Adapters were AddRef'd in RegisterInstance, so they are released symmetrically by the
+        // caller. A shared (Host/Process) instance lives as one RefCounter across every session, so
+        // disposing it directly would destroy it while other sessions still hold references —
+        // Release disposes only at the last one.
+        return [.. adapters.Select(x => x.Value)];
     }
 
     public void Dispose()
@@ -229,19 +255,24 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             ad.DisposeAsync().AsTask().Wait();
     }
 
+    // Disposes a call target (an adapter, or a client-side ServiceInstance) preferring asynchronous
+    // disposal, so a service that only offers DisposeAsync is released properly and no instance ever
+    // sees both of its disposal methods called.
+    private static async ValueTask DisposeTargetAsync(ICallTarget target)
+    {
+        if (target is IAsyncDisposable ad)
+            await ad.DisposeAsync().ConfigureAwait(false);
+        else
+            (target as IDisposable)?.Dispose();
+    }
+
+    // Releases the proxies this session holds. Notifying the remote peer is best-effort here — the
+    // connection that owned those instances is usually already gone — so this uses the synchronous,
+    // fire-and-forget release rather than waiting for the peer to confirm the way an explicit
+    // `await proxy.DisposeAsync()` does.
     private static async ValueTask DisposeInstances(IEnumerable<RefCounter<ICallTarget>> instances)
     {
-        var tasks = instances
-            .Select(i =>
-            {
-                if (i is IAsyncDisposable ad)
-                    return ad.DisposeAsync().AsTask();
-                return Task.Run(() => i.Dispose());
-            });
-
-        if (tasks is null) return;
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        await Task.WhenAll(instances.Select(i => Task.Run(() => i.Dispose()))).ConfigureAwait(false);
     }
 
     public object? GetProperty(Enum key)
@@ -363,6 +394,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                         lock (_sessionInstances)
                             _sessionInstances.Remove(type);
                         if (x is IDisposable d) d.Dispose();
+                    },
+                    async x =>
+                    {
+                        lock (_sessionInstances)
+                            _sessionInstances.Remove(type);
+                        await DisposeTargetAsync(x).ConfigureAwait(false);
                     }
                 );
                 _sessionInstances.Add(type, instanceRef);
@@ -445,6 +482,13 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                         // Disposing the adapter disposes the wrapped instance too
                         // (InterfaceAdapter owns it), so no separate instance dispose here.
                         (x as IDisposable)?.Dispose();
+                    },
+                    async x =>
+                    {
+                        lock (_instances)
+                            _instances.Remove(instance);
+
+                        await DisposeTargetAsync(x).ConfigureAwait(false);
                     }
                 );
                 _instances.Add(instance, refCounter);
@@ -489,7 +533,10 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
     }
 
-    private void ReleaseInstance(Guid instanceId)
+    // Releasing an exposed instance disposes the wrapped object when the last reference goes, and the
+    // caller awaits that: the remote peer's DisposeAsync must not be answered before the local object
+    // is actually disposed.
+    private async Task ReleaseInstanceAsync(Guid instanceId)
     {
         RefCounter<ICallTarget>? instance;
         EventHandler<EventDataArgs>? handler;
@@ -505,7 +552,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
         CleanupAdapter(instance, handler);
 
-        instance.Release();
+        await instance.ReleaseAsync().ConfigureAwait(false);
     }
 
     internal object GetProxy(Type type, Guid instanceId, bool restorable = false)
@@ -517,11 +564,13 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 var serviceInstance = new ServiceInstance(instanceId, _handler, type);
                 proxyRef = new RefCounter<ICallTarget>(serviceInstance, x =>
                 {
-                    lock (_proxies)
-                        _proxies.Remove(instanceId);
-                    lock (_restorableInstances)
-                        _restorableInstances.Remove(instanceId);
+                    RemoveProxy(instanceId);
                     if (x is IDisposable d) d.Dispose();
+                },
+                async x =>
+                {
+                    RemoveProxy(instanceId);
+                    await DisposeTargetAsync(x).ConfigureAwait(false);
                 });
                 _proxies.Add(instanceId, proxyRef);
 
@@ -532,6 +581,14 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
             return InterfaceProxy.CreateProxy(instanceId, type, proxyRef, SerializationContext);
         }
+    }
+
+    private void RemoveProxy(Guid instanceId)
+    {
+        lock (_proxies)
+            _proxies.Remove(instanceId);
+        lock (_restorableInstances)
+            _restorableInstances.Remove(instanceId);
     }
 
     private ICallTarget? GetAdapter(Guid instanceId)
@@ -572,7 +629,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 instance = new RefCounter<ICallTarget>
                 (
                     CreateAdapter(type, factory()),
-                    x => (x as IDisposable)?.Dispose()
+                    x => (x as IDisposable)?.Dispose(),
+                    async x => await DisposeTargetAsync(x).ConfigureAwait(false)
                 );
                 break;
 
@@ -618,7 +676,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 }
                 else if (request is ReleaseInstancePacket rip)
                 {
-                    ReleaseInstance(rip.InstanceId);
+                    await ReleaseInstanceAsync(rip.InstanceId).ConfigureAwait(false);
                     return new SuccessPacket(request);
                 }
                 else if (request is MethodCallPacket mcp)

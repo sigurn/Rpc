@@ -210,7 +210,17 @@ class RpcHandler : IDisposable
         return answer.InstanceId;
     }
 
-    public async Task ReleaseServiceInstanceAsync(Guid instanceId, CancellationToken cancellationToken)
+    public Task ReleaseServiceInstanceAsync(Guid instanceId, CancellationToken cancellationToken)
+    {
+        return ReleaseServiceInstanceAsync(instanceId, waitForCompletion: false, cancellationToken);
+    }
+
+    /// <param name="waitForCompletion">
+    /// When true, waits for the remote side to confirm the release. The peer answers a release only
+    /// after it disposed the instance, so this is what makes an awaited asynchronous disposal mean
+    /// "the remote object is gone" instead of "the notification was sent".
+    /// </param>
+    public async Task ReleaseServiceInstanceAsync(Guid instanceId, bool waitForCompletion, CancellationToken cancellationToken)
     {
         // Releasing an instance is a best-effort notification to the remote side.
         // When the channel is not opened (typically the disconnect that triggered the
@@ -225,7 +235,23 @@ class RpcHandler : IDisposable
             InstanceId = instanceId
         };
 
-        await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!waitForCompletion)
+        {
+            await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            await RequestAsync<SuccessPacket>(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or InvalidOperationException or ObjectDisposedException)
+        {
+            // Transport-level failures keep the best-effort contract of a release: the remote session
+            // is gone (or going), and it tears its adapters down on its own. Failures reported *by*
+            // the remote disposal itself are not caught here — they surface to the caller.
+            _logger.LogDebug(ex, "Release of instance {InstanceId} was not confirmed", instanceId);
+        }
     }
 
     public async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(Guid instanceId, int methodId, IReadOnlyList<byte[]> args, bool oneWay, CancellationToken cancellationToken)

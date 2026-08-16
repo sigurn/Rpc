@@ -1,9 +1,12 @@
+using Microsoft.Extensions.Logging;
 using Sigurn.Rpc.Infrastructure.Packets;
 
 namespace Sigurn.Rpc.Infrastructure;
 
 internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
 {
+    private static readonly ILogger<ServiceInstance> _logger = RpcLogging.CreateLogger<ServiceInstance>();
+
     public readonly RpcHandler _handler;
     private readonly IDisposable _removeHandler;
 
@@ -29,16 +32,31 @@ internal class ServiceInstance : ICallTarget, IDisposable, IAsyncDisposable
         _removeHandler = _handler.Handle<EventDataPacket>(EventDataPacketHandler);
     }
 
+    // Synchronous release: telling the remote side is a best-effort notification that must never fault
+    // a teardown path (a finalizer-driven release, a session being disposed, a dead channel).
     public void Dispose()
     {
-        DisposeAsync().AsTask().Wait();
+        try
+        {
+            _handler.ReleaseServiceInstanceAsync(InstanceId, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Releasing remote instance {InstanceId} failed", InstanceId);
+        }
+        finally
+        {
+            _removeHandler.Dispose();
+        }
     }
 
+    // Asynchronous release: the caller awaits the remote side actually releasing the instance, so
+    // `await proxy.DisposeAsync()` means the remote object has been disposed by the time it returns.
     public async ValueTask DisposeAsync()
     {
         try
         {
-            await _handler.ReleaseServiceInstanceAsync(InstanceId, CancellationToken.None).ConfigureAwait(false);
+            await _handler.ReleaseServiceInstanceAsync(InstanceId, waitForCompletion: true, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {

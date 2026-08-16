@@ -5,17 +5,23 @@ using Sigurn.Serialize;
 
 namespace Sigurn.Rpc.Infrastructure;
 
-public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAware
+public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposable, ISessionsAware
 {
     private static readonly ILogger<InterfaceAdapter> _logger = RpcLogging.CreateLogger<InterfaceAdapter>();
 
-    private static readonly object _lock = new();
-    private static Dictionary<Type, Func<object, InterfaceAdapter>> _factories = new();
+    // Guards _factories. Registration and lookup must take the SAME lock: a lookup running while a
+    // registration resizes the dictionary can otherwise report a registered interface as missing,
+    // which surfaces much later as "Cannot find serializer for type ..." during marshaling.
+    private static readonly Dictionary<Type, Func<object, InterfaceAdapter>> _factories = new();
+
+    // Upper bound for bridging an asynchronous disposal onto a synchronous teardown path.
+    private static readonly TimeSpan _syncDisposeTimeout = TimeSpan.FromSeconds(5);
 
     static InterfaceAdapter()
     {
         RegisterAdapter<IServiceCatalog>(x => new ServiceCatalogAdapter(x));
         RegisterAdapter<IRemoteStream>(x => new RemoteStreamAdapter(x));
+        RegisterAdapter<IAsyncDisposable>(x => new AsyncDisposableAdapter(x));
     }
 
     public static void RegisterAdapter<T>(Func<T, InterfaceAdapter> factory)
@@ -25,7 +31,7 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
 
         ArgumentNullException.ThrowIfNull(factory);
 
-        lock (_lock)
+        lock (_factories)
         {
             if (_factories.ContainsKey(typeof(T)))
                 throw new ArgumentException($"Adapter for the type {typeof(T)} is already registered");
@@ -139,9 +145,56 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
         // The exception is ShareWithin.ProcessNoDispose, where the instance is an
         // externally-owned singleton the host must not dispose.
         if (_ownsInstance)
-            (_instance as IDisposable)?.Dispose();
+            DisposeInstanceSync();
 
         _disposable?.Dispose();
+    }
+
+    // Asynchronous counterpart of Dispose. It shares the _isDisposed guard with the synchronous path,
+    // so whichever runs first wins and the wrapped instance is disposed exactly once — never through
+    // both IDisposable.Dispose and IAsyncDisposable.DisposeAsync.
+    async ValueTask IAsyncDisposable.DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        Dispose(true);
+
+        if (_ownsInstance)
+        {
+            if (_instance is IAsyncDisposable ad)
+                await ad.DisposeAsync().ConfigureAwait(false);
+            else
+                (_instance as IDisposable)?.Dispose();
+        }
+
+        _disposable?.Dispose();
+    }
+
+    // An instance that offers asynchronous disposal is always disposed through it, so a service never
+    // sees both of its disposal methods called. On the synchronous path (session teardown, a proxy
+    // finalizer) that call has to be bridged: it runs off the caller's thread, so no captured
+    // SynchronizationContext can deadlock it, and the wait is bounded so a misbehaving service cannot
+    // stall teardown indefinitely.
+    private void DisposeInstanceSync()
+    {
+        if (_instance is IAsyncDisposable ad)
+        {
+            try
+            {
+                if (!Task.Run(() => ad.DisposeAsync().AsTask()).Wait(_syncDisposeTimeout))
+                    _logger.LogDebug("Asynchronous disposal of {InstanceType} did not complete within {Timeout}",
+                        _instance.GetType().Name, _syncDisposeTimeout);
+            }
+            catch (Exception ex)
+            {
+                // Best effort: a faulting service must not abort teardown.
+                _logger.LogDebug(ex, "Asynchronous disposal of {InstanceType} failed", _instance.GetType().Name);
+            }
+
+            return;
+        }
+
+        (_instance as IDisposable)?.Dispose();
     }
 
     public Type InterfaceType { get; }
@@ -149,7 +202,11 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, ISessionsAwar
     protected SerializationContext Context
     {
         get => _context;
-        private set => _context = value;
+
+        // Never allow a null context: Sigurn.Serialize silently substitutes the default context for a
+        // missing one, and the default context cannot marshal interfaces or streams — a failure that
+        // only shows up much later, as an unrelated-looking serialization error.
+        private set => _context = value ?? throw new ArgumentNullException(nameof(value));
     }
 
     private IDisposable? Disposable

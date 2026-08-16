@@ -54,6 +54,7 @@ public class InterfaceProxy : IDisposable
     {
         RegisterProxy<IServiceCatalog>(x => new ServiceCatalogProxy(x));
         RegisterProxy<IRemoteStream>(x => new RemoteStreamProxy(x));
+        RegisterProxy<IAsyncDisposable>(x => new AsyncDisposableProxy(x));
     }
 
     internal static T CreateProxy<T>(Guid instanceId, RefCounter<ICallTarget> callTarget, SerializationContext context)
@@ -154,13 +155,50 @@ public class InterfaceProxy : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+        var callTarget = DetachForRelease();
+        if (callTarget is null) return;
+
+        try
+        {
+            callTarget.Value.EventTriggered -= _eventHandler;
+            callTarget.Release();
+        }
+        catch (ObjectDisposedException ex)
+        {
+            // The session already tore this instance down (client disposed, channel gone). Releasing
+            // an already-released reference is a no-op, not an error for the caller.
+            _logger.LogDebug(ex, "Call target already released for proxy {InstanceId}", _instanceId);
+        }
+    }
+
+    // Asynchronous release, used by proxies whose interface exposes asynchronous disposal
+    // (see AsyncDisposableProxy). Shares the disposal guard with Dispose, so the reference is
+    // released exactly once no matter which of the two is called, or in which order.
+    protected internal async ValueTask ReleaseAsync()
+    {
+        var callTarget = DetachForRelease();
+        if (callTarget is null) return;
+
+        try
+        {
+            callTarget.Value.EventTriggered -= _eventHandler;
+            await callTarget.ReleaseAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            _logger.LogDebug(ex, "Call target already released for proxy {InstanceId}", _instanceId);
+        }
+    }
+
+    // Marks the proxy disposed and hands out the call target reference to release, or null when
+    // another call already did it.
+    private RefCounter<ICallTarget>? DetachForRelease()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return null;
 
         GC.SuppressFinalize(this);
 
-        CallTarget.EventTriggered -= _eventHandler;
-        _callTarget?.Release();
-        _callTarget = null;
+        return Interlocked.Exchange(ref _callTarget, null);
     }
 
     public Guid InstanceId => _instanceId;
