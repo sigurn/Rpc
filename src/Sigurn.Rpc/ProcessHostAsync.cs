@@ -10,7 +10,7 @@ public static class ProcessHostAsync
 {
     class ProcessAcceptor : BaseAcceptor
     {
-        private static readonly ILogger _logger = RpcLogging.CreateLogger<ProcessHost>();
+        private static readonly ILogger<ProcessAcceptor> _logger = RpcLogging.CreateLogger<ProcessAcceptor>();
 
         private readonly Func<IProtocol> _protocolFactory;
 
@@ -74,8 +74,6 @@ public static class ProcessHostAsync
         {
         }
     }
-
-    private static readonly ILogger _logger = RpcLogging.CreateLogger<ProcessHost>();
 
     private static IChannel DefaultChannelFactory(IChannel channel) => channel;
     private static IProtocol DefaultProtocolFactory() => new ChannelProtocol();

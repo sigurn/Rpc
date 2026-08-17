@@ -9,7 +9,7 @@ namespace Sigurn.Rpc;
 /// </summary>
 public class ServiceHostAsync : IAsyncRunnable, IServiceHost
 {
-    private static readonly ILogger<ServiceHost> _logger = RpcLogging.CreateLogger<ServiceHost>();
+    private static readonly ILogger<ServiceHostAsync> _logger = RpcLogging.CreateLogger<ServiceHostAsync>();
 
     private record struct ServiceData(ShareWithin Shared, Func<object> Factory);
 
@@ -168,8 +168,6 @@ public class ServiceHostAsync : IAsyncRunnable, IServiceHost
     /// <param name="factory">The factory used to create service instances.</param>
     public void RegisterSerive<T>(ShareWithin share, Func<T> factory) where T : class
     {
-        using var _ = _logger.Scope();
-
         if (!typeof(T).IsInterface)
             throw new ArgumentException("Type must be an interface");
 
