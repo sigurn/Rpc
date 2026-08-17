@@ -425,7 +425,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
 
             if (_logger.IsEnabled(LogLevel.Trace))
                 _logger.LogTrace("Sending event {Interface}.{Member} [id={EventId}] for instance {InstanceId}",
-                    GetInterfaceName(s), GetEventName(s, e.EventId), e.EventId, id);
+                    GetInterfaceName(s), GetMemberName(s, RpcTraceOperation.EventRaise, e.EventId), e.EventId, id);
 
             var packet = new EventDataPacket(id, e.EventId, e.Args);
 
@@ -440,7 +440,7 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             {
                 if (_logger.IsEnabled(LogLevel.Debug))
                     _logger.LogDebug(ex, "Dropped event {Interface}.{Member} [id={EventId}] for instance {InstanceId}: channel unavailable",
-                        GetInterfaceName(s), GetEventName(s, e.EventId), e.EventId, id);
+                        GetInterfaceName(s), GetMemberName(s, RpcTraceOperation.EventRaise, e.EventId), e.EventId, id);
             }
         };
 
@@ -456,8 +456,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
 
         if (_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Instance registered: {InstanceId} interface={Interface} type={InstanceType}",
-                id, GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
+            _logger.LogInformation("Instance registered: {InstanceId} adapter=#{AdapterId} interface={Interface} type={InstanceType}",
+                id, GetAdapterId(instance.Value), GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
 
         if (instance.Value is ISessionsAware sas)
             sas.AttachSession(this);
@@ -558,11 +558,15 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         return target?.GetType().FullName ?? target?.GetType().Name ?? "?";
     }
 
-    // Only a generated adapter knows its event names; anything else falls back to the id.
-    private static string GetEventName(object? target, int eventId)
+    // Number of the adapter behind this registration, so the log ties one object to the several
+    // instance ids it is exposed under. Null for a target that is not an adapter.
+    private static int? GetAdapterId(object? target) => (target as InterfaceAdapter)?.AdapterId;
+
+    // Only a generated adapter knows its member names; anything else falls back to the id.
+    private static string GetMemberName(object? target, RpcTraceOperation operation, int memberId)
     {
-        return (target as InterfaceAdapter)?.GetEventName(eventId)
-            ?? eventId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return (target as InterfaceAdapter)?.GetMemberName(operation, memberId)
+            ?? memberId.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     // Releasing an exposed instance disposes the wrapped object when the last reference goes, and the
@@ -585,8 +589,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             // Read the names before the reference is released — after that the adapter is gone.
             try
             {
-                _logger.LogInformation("Instance released: {InstanceId} interface={Interface} type={InstanceType}",
-                    instanceId, GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
+                _logger.LogInformation("Instance released: {InstanceId} adapter=#{AdapterId} interface={Interface} type={InstanceType}",
+                    instanceId, GetAdapterId(instance.Value), GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
             }
             catch (ObjectDisposedException)
             {
@@ -707,109 +711,168 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         return instance;
     }
 
+    // What a dispatch trace needs, resolved once on entry and reused on exit.
+    private readonly record struct DispatchTrace(RpcTraceOperation Operation, string Interface, string Member, int MemberId, Guid InstanceId);
+
+    // Which member of which instance a request addresses, or null for a packet that is not a
+    // member access (instance lifecycle, batch subscribe).
+    private static (RpcTraceOperation Operation, int MemberId, Guid InstanceId)? GetTraceTarget(RpcPacket request) => request switch
+    {
+        MethodCallPacket p => (RpcTraceOperation.MethodCall, p.MethodId, p.InstanceId),
+        GetPropertyPacket p => (RpcTraceOperation.PropertyGet, p.PropertyId, p.InstanceId),
+        SetPropertyPacket p => (RpcTraceOperation.PropertySet, p.PropertyId, p.InstanceId),
+        SubscribeForEventPacket p => (RpcTraceOperation.EventAttach, p.EventId, p.InstanceId),
+        UnsubscribeFromEventPacket p => (RpcTraceOperation.EventDetach, p.EventId, p.InstanceId),
+        _ => null,
+    };
+
+    // The session owns the instance id and the request; the adapter owns the member names. Nothing
+    // here runs when trace logging is off.
+    private DispatchTrace? BeginTrace(RpcPacket request)
+    {
+        if (!_logger.IsEnabled(LogLevel.Trace)) return null;
+        if (GetTraceTarget(request) is not var (operation, memberId, instanceId)) return null;
+
+        var target = GetAdapter(instanceId);
+        var trace = new DispatchTrace(
+            operation,
+            GetInterfaceName(target),
+            GetMemberName(target, operation, memberId),
+            memberId,
+            instanceId);
+
+        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
+            trace.Operation, trace.Interface, trace.Member, trace.MemberId, trace.InstanceId);
+
+        return trace;
+    }
+
+    private void EndTrace(DispatchTrace? trace)
+    {
+        if (trace is not { } t) return;
+
+        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
+            t.Operation, t.Interface, t.Member, t.MemberId, t.InstanceId);
+    }
+
+    // Always false: used as an exception filter, so the failure is logged during the first pass
+    // without catching the exception or disturbing its stack.
+    private bool TraceFailure(DispatchTrace? trace, Exception exception)
+    {
+        if (trace is { } t)
+            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} FAILED",
+                t.Operation, t.Interface, t.Member, t.MemberId, t.InstanceId);
+
+        return false;
+    }
+
     private async Task<RpcPacket?> OnRequest(RpcPacket request, CancellationToken cancellationToken)
     {
         try
         {
             using (SetSessionScope(this))
             {
-                if (request is GetInstancePacket gip)
+                var trace = BeginTrace(request);
+                try
                 {
-                    var instance = GetServiceInstance(gip.InterfaceId);
-
-                    return new ServiceInstancePacket(request)
+                    if (request is GetInstancePacket gip)
                     {
-                        InstanceId = RegisterInstance(instance)
-                    };
-                }
-                else if (request is ReleaseInstancePacket rip)
-                {
-                    await ReleaseInstanceAsync(rip.InstanceId).ConfigureAwait(false);
-                    return new SuccessPacket(request);
-                }
-                else if (request is MethodCallPacket mcp)
-                {
-                    // The dispatch itself is traced by the adapter, which knows the interface and
-                    // member names.
-                    var instance = GetAdapter(mcp.InstanceId) ??
-                        throw new Exception("Unknown instance");
+                        var instance = GetServiceInstance(gip.InterfaceId);
 
-                    using var _instanceScope = RpcDispatchContext.Scope(mcp.InstanceId);
-
-                    var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken).ConfigureAwait(false);
-                    return new MethodResultPacket(mcp)
+                        return new ServiceInstancePacket(request)
+                        {
+                            InstanceId = RegisterInstance(instance)
+                        };
+                    }
+                    else if (request is ReleaseInstancePacket rip)
                     {
-                        Result = Result,
-                        Args = Args
-                    };
-                }
-                else if (request is GetPropertyPacket gpp)
-                {
-                    var instance = GetAdapter(gpp.InstanceId) ??
-                        throw new Exception("Unknown instance");
-
-                    using var _instanceScope = RpcDispatchContext.Scope(gpp.InstanceId);
-
-                    var value = await instance.GetPropertyValueAsync(gpp.PropertyId, cancellationToken).ConfigureAwait(false);
-                    return new PropertyValuePacket(gpp)
+                        await ReleaseInstanceAsync(rip.InstanceId).ConfigureAwait(false);
+                        return new SuccessPacket(request);
+                    }
+                    else if (request is MethodCallPacket mcp)
                     {
-                        Value = value
-                    };
+                        var instance = GetAdapter(mcp.InstanceId) ??
+                            throw new Exception("Unknown instance");
+
+
+                        var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken).ConfigureAwait(false);
+                        return new MethodResultPacket(mcp)
+                        {
+                            Result = Result,
+                            Args = Args
+                        };
+                    }
+                    else if (request is GetPropertyPacket gpp)
+                    {
+                        var instance = GetAdapter(gpp.InstanceId) ??
+                            throw new Exception("Unknown instance");
+
+
+                        var value = await instance.GetPropertyValueAsync(gpp.PropertyId, cancellationToken).ConfigureAwait(false);
+                        return new PropertyValuePacket(gpp)
+                        {
+                            Value = value
+                        };
+                    }
+                    else if (request is SetPropertyPacket spp)
+                    {
+                        var instance = GetAdapter(spp.InstanceId) ??
+                            throw new Exception("Unknown instance");
+
+
+                        await instance.SetPropertyValueAsync(spp.PropertyId, spp.Value, cancellationToken).ConfigureAwait(false);
+                        return new SuccessPacket(spp);
+                    }
+                    else if (request is SubscribeForEventPacket sfep)
+                    {
+                        var instance = GetAdapter(sfep.InstanceId) ??
+                            throw new Exception("Unknown instance");
+
+
+                        await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken).ConfigureAwait(false);
+                        return new SuccessPacket(sfep);
+                    }
+                    else if (request is SubscribeForEventsPacket sfeps)
+                    {
+                        var instance = GetAdapter(sfeps.InstanceId) ??
+                            throw new Exception("Unknown instance");
+
+
+                        await instance.AttachEventHandlersAsync(sfeps.EventIds, cancellationToken).ConfigureAwait(false);
+                        return new SuccessPacket(sfeps);
+                    }
+                    else if (request is UnsubscribeFromEventPacket ufep)
+                    {
+                        var instance = GetAdapter(ufep.InstanceId) ??
+                            throw new Exception("Unknown instance");
+
+
+                        await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken).ConfigureAwait(false);
+                        return new SuccessPacket(ufep);
+                    }
+                    else if (request is EventDataPacket)
+                    {
+                        // Fire-and-forget from the remote side; already handled by
+                        // _packetHandlers (ServiceInstance). No response expected.
+                        return null;
+                    }
+                    else if (request is ExceptionPacket)
+                    {
+                        // Stale error response not matched by any pending TCS.
+                        // Drop silently to break any ExceptionPacket ping-pong loop.
+                        return null;
+                    }
+
+                    throw new Exception("Unknown packet");
                 }
-                else if (request is SetPropertyPacket spp)
+                catch (Exception @__ex) when (TraceFailure(trace, @__ex))
                 {
-                    var instance = GetAdapter(spp.InstanceId) ??
-                        throw new Exception("Unknown instance");
-
-                    using var _instanceScope = RpcDispatchContext.Scope(spp.InstanceId);
-
-                    await instance.SetPropertyValueAsync(spp.PropertyId, spp.Value, cancellationToken).ConfigureAwait(false);
-                    return new SuccessPacket(spp);
+                    throw;
                 }
-                else if (request is SubscribeForEventPacket sfep)
+                finally
                 {
-                    var instance = GetAdapter(sfep.InstanceId) ??
-                        throw new Exception("Unknown instance");
-
-                    using var _instanceScope = RpcDispatchContext.Scope(sfep.InstanceId);
-
-                    await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken).ConfigureAwait(false);
-                    return new SuccessPacket(sfep);
+                    EndTrace(trace);
                 }
-                else if (request is SubscribeForEventsPacket sfeps)
-                {
-                    var instance = GetAdapter(sfeps.InstanceId) ??
-                        throw new Exception("Unknown instance");
-
-                    using var _instanceScope = RpcDispatchContext.Scope(sfeps.InstanceId);
-
-                    await instance.AttachEventHandlersAsync(sfeps.EventIds, cancellationToken).ConfigureAwait(false);
-                    return new SuccessPacket(sfeps);
-                }
-                else if (request is UnsubscribeFromEventPacket ufep)
-                {
-                    var instance = GetAdapter(ufep.InstanceId) ??
-                        throw new Exception("Unknown instance");
-
-                    using var _instanceScope = RpcDispatchContext.Scope(ufep.InstanceId);
-
-                    await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken).ConfigureAwait(false);
-                    return new SuccessPacket(ufep);
-                }
-                else if (request is EventDataPacket)
-                {
-                    // Fire-and-forget from the remote side; already handled by
-                    // _packetHandlers (ServiceInstance). No response expected.
-                    return null;
-                }
-                else if (request is ExceptionPacket)
-                {
-                    // Stale error response not matched by any pending TCS.
-                    // Drop silently to break any ExceptionPacket ping-pong loop.
-                    return null;
-                }
-
-                throw new Exception("Unknown packet");
             }
         }
         catch (Exception ex)

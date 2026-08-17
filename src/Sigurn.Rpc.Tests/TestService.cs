@@ -120,9 +120,35 @@ class TestServiceAdapter : InterfaceAdapter
         _instance = instance;
     }
 
-    protected internal override string? GetEventName(int eventId)
+    protected internal override string? GetMemberName(RpcTraceOperation operation, int memberId)
     {
-        if (eventId == 1) return @__event_1;
+        switch (operation)
+        {
+            case RpcTraceOperation.MethodCall:
+                if (memberId == 1) return @__method_1;
+                else if (memberId == 2) return @__method_2;
+                else if (memberId == 3) return @__method_3;
+                else if (memberId == 4) return @__method_4;
+                else if (memberId == 5) return @__method_5;
+                else if (memberId == 6) return @__method_6;
+                else if (memberId == 7) return @__method_7;
+                else if (memberId == 8) return @__method_8;
+                else if (memberId == 9) return @__method_9;
+                else if (memberId == 10) return @__method_10;
+                else if (memberId == 11) return @__method_11;
+                break;
+
+            case RpcTraceOperation.PropertyGet:
+            case RpcTraceOperation.PropertySet:
+                if (memberId == 1) return @__property_1;
+                break;
+
+            case RpcTraceOperation.EventAttach:
+            case RpcTraceOperation.EventDetach:
+            case RpcTraceOperation.EventRaise:
+                if (memberId == 1) return @__event_1;
+                break;
+        }
 
         return null;
     }
@@ -131,224 +157,92 @@ class TestServiceAdapter : InterfaceAdapter
     {
         if (methodId == 1)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_1, 1);
-            try
-            {
-                _instance.Method1();
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_1, 1))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_1, 1);
-            }
+            _instance.Method1();
         }
         else if (methodId == 2)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_2, 2);
-            try
-            {
-                if (args is null || args.Count != 2)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 2)
+                throw new ArgumentException("Invalid number of arguments");
 
-                var arg0 = await FromBytesAsync<int>(args[0], cancellationToken);
-                var arg1 = await FromBytesAsync<int>(args[1], cancellationToken);
-                var res = _instance.Add(arg0, arg1);
-                return (Result: await ToBytesAsync(res, cancellationToken), Args: null);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_2, 2))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_2, 2);
-            }
+            var arg0 = await FromBytesAsync<int>(args[0], cancellationToken);
+            var arg1 = await FromBytesAsync<int>(args[1], cancellationToken);
+            var res = _instance.Add(arg0, arg1);
+            return (Result: await ToBytesAsync(res, cancellationToken), Args: null);
         }
         else if (methodId == 3)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_3, 3);
-            try
-            {
-                string text;
-                _instance.GetString(out text);
-                return (Result: null, Args: [await ToBytesAsync(text, cancellationToken)]);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_3, 3))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_3, 3);
-            }
+            string text;
+            _instance.GetString(out text);
+            return (Result: null, Args: [await ToBytesAsync(text, cancellationToken)]);
         }
         else if (methodId == 4)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_4, 4);
-            try
-            {
-                if (args is null || args.Count != 1)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 1)
+                throw new ArgumentException("Invalid number of arguments");
 
-                string text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
-                var res = _instance.ModifyString(ref text);
-                return (Result: await ToBytesAsync(res, cancellationToken), Args: [await ToBytesAsync(text, cancellationToken)]);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_4, 4))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_4, 4);
-            }
+            string text = await FromBytesAsync<string>(args[0], cancellationToken) ?? throw new ArgumentNullException("text");
+            var res = _instance.ModifyString(ref text);
+            return (Result: await ToBytesAsync(res, cancellationToken), Args: [await ToBytesAsync(text, cancellationToken)]);
         }
         else if (methodId == 5)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_5, 5);
-            try
-            {
-                if (args is null || args.Count != 0)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 0)
+                throw new ArgumentException("Invalid number of arguments");
 
-                await _instance.Method1Async(cancellationToken);
-                return (Result: null, Args: null);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_5, 5))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_5, 5);
-            }
+            await _instance.Method1Async(cancellationToken);
+            return (Result: null, Args: null);
         }
         else if (methodId == 6)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_6, 6);
-            try
-            {
-                if (args is null || args.Count != 2)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 2)
+                throw new ArgumentException("Invalid number of arguments");
 
-                var a = await FromBytesAsync<int>(args[0], cancellationToken);
-                var b = await FromBytesAsync<int>(args[1], cancellationToken);
-                var res = await _instance.AddAsync(a, b, cancellationToken);
-                return (Result: await ToBytesAsync(res, cancellationToken), Args: null);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_6, 6))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_6, 6);
-            }
+            var a = await FromBytesAsync<int>(args[0], cancellationToken);
+            var b = await FromBytesAsync<int>(args[1], cancellationToken);
+            var res = await _instance.AddAsync(a, b, cancellationToken);
+            return (Result: await ToBytesAsync(res, cancellationToken), Args: null);
         }
         else if (methodId == 7)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_7, 7);
-            try
-            {
-                if (args is null || args.Count != 1)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 1)
+                throw new ArgumentException("Invalid number of arguments");
 
-                var handler = await FromBytesAsync<ITestNotification>(args[0], cancellationToken);
-                _instance.Subscribe(handler);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_7, 7))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_7, 7);
-            }
+            var handler = await FromBytesAsync<ITestNotification>(args[0], cancellationToken);
+            _instance.Subscribe(handler);
         }
         else if (methodId == 8)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_8, 8);
-            try
-            {
-                if (args is null || args.Count != 1)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 1)
+                throw new ArgumentException("Invalid number of arguments");
 
-                var data = await FromBytesAsync<string>(args[0], cancellationToken);
-                if (data is null)
-                    throw new ArgumentNullException("data");
+            var data = await FromBytesAsync<string>(args[0], cancellationToken);
+            if (data is null)
+                throw new ArgumentNullException("data");
 
-                _instance.NotifySubscribers(data);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_8, 8))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_8, 8);
-            }
+            _instance.NotifySubscribers(data);
         }
         else if (methodId == 9)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_9, 9);
-            try
-            {
-                if (args is null || args.Count != 1)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 1)
+                throw new ArgumentException("Invalid number of arguments");
 
-                var handler = await FromBytesAsync<ITestNotification>(args[0], cancellationToken);
-                if (handler is null)
-                    throw new NullReferenceException("Handler cannot be null");
-                _instance.Unsubscribe(handler);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_9, 9))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_9, 9);
-            }
+            var handler = await FromBytesAsync<ITestNotification>(args[0], cancellationToken);
+            if (handler is null)
+                throw new NullReferenceException("Handler cannot be null");
+            _instance.Unsubscribe(handler);
         }
         else if (methodId == 10)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_10, 10);
-            try
-            {
-                if (args is null || args.Count != 0)
-                    throw new ArgumentException("Invalid number of arguments");
+            if (args is null || args.Count != 0)
+                throw new ArgumentException("Invalid number of arguments");
 
-                await _instance.MethodThrowAsync(cancellationToken);
-                return (Result: null, Args: null);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_10, 10))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_10, 10);
-            }
+            await _instance.MethodThrowAsync(cancellationToken);
+            return (Result: null, Args: null);
         }
         else if (methodId == 11)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, @__method_11, 11);
-            try
-            {
-                var result = _instance.GetSubService();
-                return (Result: await ToBytesAsync<ITestNotification>(result, cancellationToken), Args: null);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, @__method_11, 11))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, @__method_11, 11);
-            }
+            var result = _instance.GetSubService();
+            return (Result: await ToBytesAsync<ITestNotification>(result, cancellationToken), Args: null);
         }
 
         return (Result: null, Args: null);
@@ -358,19 +252,7 @@ class TestServiceAdapter : InterfaceAdapter
     {
         if (propertyId == 1)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.PropertyGet, @__property_1, 1);
-            try
-            {
-                return await ToBytesAsync(_instance.Property1, cancellationToken);
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.PropertyGet, @__property_1, 1))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.PropertyGet, @__property_1, 1);
-            }
+            return await ToBytesAsync(_instance.Property1, cancellationToken);
         }
 
         throw new Exception("Unknown property");
@@ -380,21 +262,9 @@ class TestServiceAdapter : InterfaceAdapter
     {
         if (propertyId == 1)
         {
-            if (IsTraceEnabled) TraceEnter(RpcTraceOperation.PropertySet, @__property_1, 1);
-            try
-            {
-                ArgumentNullException.ThrowIfNull(value);
-                _instance.Property1 = await FromBytesAsync<int>(value, cancellationToken);
-                return;
-            }
-            catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.PropertySet, @__property_1, 1))
-            {
-                throw;
-            }
-            finally
-            {
-                if (IsTraceEnabled) TraceExit(RpcTraceOperation.PropertySet, @__property_1, 1);
-            }
+            ArgumentNullException.ThrowIfNull(value);
+            _instance.Property1 = await FromBytesAsync<int>(value, cancellationToken);
+            return;
         }
 
         throw new Exception("Unknown property");
@@ -406,20 +276,8 @@ class TestServiceAdapter : InterfaceAdapter
         {
             if (eventId == 1)
             {
-                if (IsTraceEnabled) TraceEnter(RpcTraceOperation.EventAttach, @__event_1, 1);
-                try
-                {
-                    _instance.TestEvent += OnTestEvent;
-                    return Task.CompletedTask;
-                }
-                catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.EventAttach, @__event_1, 1))
-                {
-                    throw;
-                }
-                finally
-                {
-                    if (IsTraceEnabled) TraceExit(RpcTraceOperation.EventAttach, @__event_1, 1);
-                }
+                _instance.TestEvent += OnTestEvent;
+                return Task.CompletedTask;
             }
 
             throw new ArgumentException("Unknown event", nameof(eventId));
@@ -436,20 +294,8 @@ class TestServiceAdapter : InterfaceAdapter
         {
             if (eventId == 1)
             {
-                if (IsTraceEnabled) TraceEnter(RpcTraceOperation.EventDetach, @__event_1, 1);
-                try
-                {
-                    _instance.TestEvent -= OnTestEvent;
-                    return Task.CompletedTask;
-                }
-                catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.EventDetach, @__event_1, 1))
-                {
-                    throw;
-                }
-                finally
-                {
-                    if (IsTraceEnabled) TraceExit(RpcTraceOperation.EventDetach, @__event_1, 1);
-                }
+                _instance.TestEvent -= OnTestEvent;
+                return Task.CompletedTask;
             }
 
             throw new ArgumentException("Unknown event", nameof(eventId));
@@ -462,19 +308,7 @@ class TestServiceAdapter : InterfaceAdapter
 
     private void OnTestEvent(object? sender, EventArgs args)
     {
-        if (IsTraceEnabled) TraceEnter(RpcTraceOperation.EventRaise, @__event_1, 1);
-        try
-        {
-            SendEvent(1, ToBytes(args));
-        }
-        catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.EventRaise, @__event_1, 1))
-        {
-            throw;
-        }
-        finally
-        {
-            if (IsTraceEnabled) TraceExit(RpcTraceOperation.EventRaise, @__event_1, 1);
-        }
+        SendEvent(1, ToBytes(args));
     }
 }
 

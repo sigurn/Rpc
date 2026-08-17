@@ -28,88 +28,81 @@ sealed class RemoteStreamAdapter : InterfaceAdapter
         _instance = instance ?? throw new ArgumentNullException(nameof(instance));
     }
 
+    protected internal override string? GetMemberName(RpcTraceOperation operation, int memberId)
+    {
+        if (operation != RpcTraceOperation.MethodCall) return null;
+        if (memberId < 0 || memberId >= _methodNames.Length) return null;
+
+        return _methodNames[memberId];
+    }
+
     public override async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(int methodId, IReadOnlyList<byte[]>? args, bool oneWay, CancellationToken cancellationToken)
     {
-        if (methodId < 0 || methodId >= _methodNames.Length)
-            return await base.InvokeMethodAsync(methodId, args, oneWay, cancellationToken).ConfigureAwait(false);
-
-        var member = _methodNames[methodId];
-
-        if (IsTraceEnabled) TraceEnter(RpcTraceOperation.MethodCall, member, methodId);
-        try
+        switch (methodId)
         {
-            switch (methodId)
+            case 0: // GetInfoAsync()
             {
-                case 0: // GetInfoAsync()
-                {
-                    EnsureArgCount(args, 0);
-                    var info = await _instance.GetInfoAsync(cancellationToken).ConfigureAwait(false);
-                    return (await ToBytesAsync(info, cancellationToken).ConfigureAwait(false), null);
-                }
-                case 1: // ReadAsync(int count)
-                {
-                    EnsureArgCount(args, 1);
-                    var count = await FromBytesAsync<int>(args![0], cancellationToken).ConfigureAwait(false);
-                    var data = await _instance.ReadAsync(count, cancellationToken).ConfigureAwait(false);
-                    return (await ToBytesAsync(data, cancellationToken).ConfigureAwait(false), null);
-                }
-                case 2: // WriteAsync(byte[] data)
-                {
-                    EnsureArgCount(args, 1);
-                    var data = await FromBytesAsync<byte[]>(args![0], cancellationToken).ConfigureAwait(false) ?? [];
-                    await _instance.WriteAsync(data, cancellationToken).ConfigureAwait(false);
-                    return (null, null);
-                }
-                case 3: // SeekAsync(long offset, SeekOrigin origin)
-                {
-                    EnsureArgCount(args, 2);
-                    var offset = await FromBytesAsync<long>(args![0], cancellationToken).ConfigureAwait(false);
-                    var origin = await FromBytesAsync<SeekOrigin>(args![1], cancellationToken).ConfigureAwait(false);
-                    var position = await _instance.SeekAsync(offset, origin, cancellationToken).ConfigureAwait(false);
-                    return (await ToBytesAsync(position, cancellationToken).ConfigureAwait(false), null);
-                }
-                case 4: // SetLengthAsync(long value)
-                {
-                    EnsureArgCount(args, 1);
-                    var value = await FromBytesAsync<long>(args![0], cancellationToken).ConfigureAwait(false);
-                    await _instance.SetLengthAsync(value, cancellationToken).ConfigureAwait(false);
-                    return (null, null);
-                }
-                case 5: // FlushAsync()
-                {
-                    EnsureArgCount(args, 0);
-                    await _instance.FlushAsync(cancellationToken).ConfigureAwait(false);
-                    return (null, null);
-                }
-                case 6: // GetPositionAsync()
-                {
-                    EnsureArgCount(args, 0);
-                    var position = await _instance.GetPositionAsync(cancellationToken).ConfigureAwait(false);
-                    return (await ToBytesAsync(position, cancellationToken).ConfigureAwait(false), null);
-                }
-                case 7: // SetPositionAsync(long value)
-                {
-                    EnsureArgCount(args, 1);
-                    var value = await FromBytesAsync<long>(args![0], cancellationToken).ConfigureAwait(false);
-                    await _instance.SetPositionAsync(value, cancellationToken).ConfigureAwait(false);
-                    return (null, null);
-                }
-                default: // 8: GetLengthAsync()
-                {
-                    EnsureArgCount(args, 0);
-                    var length = await _instance.GetLengthAsync(cancellationToken).ConfigureAwait(false);
-                    return (await ToBytesAsync(length, cancellationToken).ConfigureAwait(false), null);
-                }
+                EnsureArgCount(args, 0);
+                var info = await _instance.GetInfoAsync(cancellationToken).ConfigureAwait(false);
+                return (await ToBytesAsync(info, cancellationToken).ConfigureAwait(false), null);
+            }
+            case 1: // ReadAsync(int count)
+            {
+                EnsureArgCount(args, 1);
+                var count = await FromBytesAsync<int>(args![0], cancellationToken).ConfigureAwait(false);
+                var data = await _instance.ReadAsync(count, cancellationToken).ConfigureAwait(false);
+                return (await ToBytesAsync(data, cancellationToken).ConfigureAwait(false), null);
+            }
+            case 2: // WriteAsync(byte[] data)
+            {
+                EnsureArgCount(args, 1);
+                var data = await FromBytesAsync<byte[]>(args![0], cancellationToken).ConfigureAwait(false) ?? [];
+                await _instance.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+                return (null, null);
+            }
+            case 3: // SeekAsync(long offset, SeekOrigin origin)
+            {
+                EnsureArgCount(args, 2);
+                var offset = await FromBytesAsync<long>(args![0], cancellationToken).ConfigureAwait(false);
+                var origin = await FromBytesAsync<SeekOrigin>(args![1], cancellationToken).ConfigureAwait(false);
+                var position = await _instance.SeekAsync(offset, origin, cancellationToken).ConfigureAwait(false);
+                return (await ToBytesAsync(position, cancellationToken).ConfigureAwait(false), null);
+            }
+            case 4: // SetLengthAsync(long value)
+            {
+                EnsureArgCount(args, 1);
+                var value = await FromBytesAsync<long>(args![0], cancellationToken).ConfigureAwait(false);
+                await _instance.SetLengthAsync(value, cancellationToken).ConfigureAwait(false);
+                return (null, null);
+            }
+            case 5: // FlushAsync()
+            {
+                EnsureArgCount(args, 0);
+                await _instance.FlushAsync(cancellationToken).ConfigureAwait(false);
+                return (null, null);
+            }
+            case 6: // GetPositionAsync()
+            {
+                EnsureArgCount(args, 0);
+                var position = await _instance.GetPositionAsync(cancellationToken).ConfigureAwait(false);
+                return (await ToBytesAsync(position, cancellationToken).ConfigureAwait(false), null);
+            }
+            case 7: // SetPositionAsync(long value)
+            {
+                EnsureArgCount(args, 1);
+                var value = await FromBytesAsync<long>(args![0], cancellationToken).ConfigureAwait(false);
+                await _instance.SetPositionAsync(value, cancellationToken).ConfigureAwait(false);
+                return (null, null);
+            }
+            case 8: // GetLengthAsync()
+            {
+                EnsureArgCount(args, 0);
+                var length = await _instance.GetLengthAsync(cancellationToken).ConfigureAwait(false);
+                return (await ToBytesAsync(length, cancellationToken).ConfigureAwait(false), null);
             }
         }
-        catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOperation.MethodCall, member, methodId))
-        {
-            throw;
-        }
-        finally
-        {
-            if (IsTraceEnabled) TraceExit(RpcTraceOperation.MethodCall, member, methodId);
-        }
+
+        return await base.InvokeMethodAsync(methodId, args, oneWay, cancellationToken).ConfigureAwait(false);
     }
 
     private static void EnsureArgCount(IReadOnlyList<byte[]>? args, int expected)

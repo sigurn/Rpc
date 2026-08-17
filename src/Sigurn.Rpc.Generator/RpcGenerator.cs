@@ -96,14 +96,11 @@ namespace Sigurn.Rpc.Generator
             return $"{m.Name}({args})";
         }
 
-        // Names shared by the trace call sites of one generated class.
-        private static StringBuilder GetTraceMetadata(string fullTypeName, RemoteInterfaceTypeInfo riti)
+        // The member names of one generated class: the adapter answers with them, the proxy traces
+        // with them.
+        private static StringBuilder GetMemberNames(RemoteInterfaceTypeInfo riti)
         {
             var sb = new StringBuilder();
-
-            sb.Append($"    private const string @__rpcInterfaceName = \"{fullTypeName}\";\n");
-            sb.Append("    protected override string RpcInterfaceName => @__rpcInterfaceName;\n");
-            sb.Append("\n");
 
             foreach (var p in riti.Properties)
                 sb.Append($"    private const string @__property_{p.Id} = \"{p.Name}\";\n");
@@ -119,31 +116,50 @@ namespace Sigurn.Rpc.Generator
             return sb;
         }
 
-        // An event fanned out to the subscribed sessions is logged outside any dispatch, so the
-        // session resolves the name through the adapter instead of a trace call site.
-        private static StringBuilder GetEventNameLookup(RemoteInterfaceTypeInfo riti)
+        // The adapter owns neither the instance id nor the request, so it does not log; it only tells
+        // the session what a member is called.
+        private static StringBuilder GetMemberNameLookup(RemoteInterfaceTypeInfo riti)
         {
             var sb = new StringBuilder();
 
-            if (riti.Events.Count == 0)
-                return sb;
-
-            sb.Append("    protected override string? GetEventName(int eventId)\n");
+            sb.Append("    protected override string? GetMemberName(RpcTraceOp operation, int memberId)\n");
             sb.Append("    {\n");
+            sb.Append("        switch (operation)\n");
+            sb.Append("        {\n");
 
-            bool first = true;
-            foreach (var e in riti.Events)
-            {
-                sb.Append($"        {(first ? "if" : "else if")} (eventId == {e.Id}) return @__event_{e.Id};\n");
-                first = false;
-            }
+            AppendMemberNameCases(sb, new[] { "RpcTraceOp.MethodCall" },
+                riti.Methods.Select(x => (x.Id, $"@__method_{x.Id}")).ToArray());
+            AppendMemberNameCases(sb, new[] { "RpcTraceOp.PropertyGet", "RpcTraceOp.PropertySet" },
+                riti.Properties.Select(x => (x.Id, $"@__property_{x.Id}")).ToArray());
+            AppendMemberNameCases(sb, new[] { "RpcTraceOp.EventAttach", "RpcTraceOp.EventDetach", "RpcTraceOp.EventRaise" },
+                riti.Events.Select(x => (x.Id, $"@__event_{x.Id}")).ToArray());
 
+            sb.Append("        }\n");
             sb.Append("\n");
             sb.Append("        return null;\n");
             sb.Append("    }\n");
             sb.Append("\n");
 
             return sb;
+        }
+
+        private static void AppendMemberNameCases(StringBuilder sb, string[] operations, (int Id, string Constant)[] members)
+        {
+            if (members.Length == 0)
+                return;
+
+            foreach (var operation in operations)
+                sb.Append($"            case {operation}:\n");
+
+            bool first = true;
+            foreach (var member in members)
+            {
+                sb.Append($"                {(first ? "if" : "else if")} (memberId == {member.Id}) return {member.Constant};\n");
+                first = false;
+            }
+
+            sb.Append("                break;\n");
+            sb.Append("\n");
         }
 
         // A method with ref/out parameters is answered with the out args; without them there is
@@ -209,8 +225,8 @@ namespace Sigurn.Rpc.Generator
             sb.Append("    }\n");
             sb.Append("\n");
 
-            sb.Append(GetTraceMetadata(fullTypeName, riti));
-            sb.Append(GetEventNameLookup(riti));
+            sb.Append(GetMemberNames(riti));
+            sb.Append(GetMemberNameLookup(riti));
 
             var gsb = new StringBuilder();
             var ssb = new StringBuilder();
@@ -277,8 +293,7 @@ namespace Sigurn.Rpc.Generator
                             gbody.Append(" ?? throw new InvalidOperationException(\"Property value cannot be null\")");
                         gbody.Append(";\n");
 
-                        AppendTraced(gsb, "            ", "PropertyGet", $"@__property_{p.Id}", p.Id, gbody);
-
+                        gsb.Append(gbody);
                         gsb.Append("        }\n");
                         firstGetter = false;
                     }
@@ -312,8 +327,7 @@ namespace Sigurn.Rpc.Generator
                         sbody.Append(";\n");
                         sbody.Append("            return;\n");
 
-                        AppendTraced(ssb, "            ", "PropertySet", $"@__property_{p.Id}", p.Id, sbody);
-
+                        ssb.Append(sbody);
                         ssb.Append("        }\n");
                         firstSetter = false;
                     }
@@ -456,8 +470,7 @@ namespace Sigurn.Rpc.Generator
                         }
                     }
 
-                    AppendTraced(sb, "            ", "MethodCall", $"@__method_{m.Id}", m.Id, mbody);
-
+                    sb.Append(mbody);
                     sb.Append("        }\n");
                     firstMethod = false;
                 }
@@ -523,7 +536,7 @@ namespace Sigurn.Rpc.Generator
                             rbody.Append($", ToBytes<{ea.Symbol.Type}>({ea.Name})");
                         rbody.Append(");\n");
 
-                        AppendTraced(ehsb, "        ", "EventRaise", $"@__event_{e.Id}", e.Id, rbody);
+                        ehsb.Append(rbody);
                     }
                     ehsb.Append("    }\n");
                     if (firstEvent)
@@ -560,8 +573,8 @@ namespace Sigurn.Rpc.Generator
                     abody.Append($"                _instance.{e.Name} += On{e.Name};\n");
                     dbody.Append($"                _instance.{e.Name} -= On{e.Name};\n");
 
-                    AppendTraced(aesb, "                ", "EventAttach", $"@__event_{e.Id}", e.Id, abody);
-                    AppendTraced(desb, "                ", "EventDetach", $"@__event_{e.Id}", e.Id, dbody);
+                    aesb.Append(abody);
+                    desb.Append(dbody);
 
                     aesb.Append("            }\n");
                     desb.Append("            }\n");
@@ -618,7 +631,10 @@ namespace Sigurn.Rpc.Generator
             sb.Append("    }\n");
             sb.Append("\n");
 
-            sb.Append(GetTraceMetadata(fullTypeName, riti));
+            sb.Append($"    private const string @__rpcInterfaceName = \"{fullTypeName}\";\n");
+            sb.Append("    protected override string RpcInterfaceName => @__rpcInterfaceName;\n");
+            sb.Append("\n");
+            sb.Append(GetMemberNames(riti));
 
             if (riti.Properties.Count != 0)
             {

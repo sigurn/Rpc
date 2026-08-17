@@ -6,7 +6,9 @@ namespace Sigurn.Rpc.Tests;
 
 /// <summary>
 /// Verifies that member access is traced with full interface and member names on both sides of the
-/// wire, and that nothing is traced when the level is off.
+/// wire, and that nothing is traced when the level is off. The proxy traces itself - it owns its
+/// instance id; on the server the session traces, since the adapter owns neither the id nor the
+/// request.
 /// </summary>
 [Collection("RpcLogging")]
 public class RpcTracingTests
@@ -21,8 +23,10 @@ public class RpcTracingTests
             && record.HasField("Interface", InterfaceName)
             && record.HasField("Member", member);
 
-    private static bool IsAdapterTrace(LogRecord record, RpcTraceOperation operation, string member, string prefix)
-        => record.Category == typeof(InterfaceAdapter).FullName
+    // Server side dispatch is traced by the session: it owns the instance id and the request, and
+    // asks the adapter only for the member name.
+    private static bool IsDispatchTrace(LogRecord record, RpcTraceOperation operation, string member, string prefix)
+        => record.Category == typeof(Session).FullName
             && record.Level == LogLevel.Trace
             && record.Message.StartsWith(prefix)
             && record.HasField("Operation", operation)
@@ -83,8 +87,8 @@ public class RpcTracingTests
 
         Assert.Contains(records, x => IsProxyTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "==>"));
         Assert.Contains(records, x => IsProxyTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "<=="));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "==>"));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "<=="));
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "==>"));
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "<=="));
     }
 
     [Fact(Timeout = 30000)]
@@ -103,8 +107,8 @@ public class RpcTracingTests
 
         Assert.Contains(records, x => IsProxyTrace(x, RpcTraceOperation.PropertySet, "Property1", "==>"));
         Assert.Contains(records, x => IsProxyTrace(x, RpcTraceOperation.PropertyGet, "Property1", "==>"));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.PropertySet, "Property1", "<=="));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.PropertyGet, "Property1", "<=="));
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.PropertySet, "Property1", "<=="));
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.PropertyGet, "Property1", "<=="));
     }
 
     [Fact(Timeout = 30000)]
@@ -125,8 +129,8 @@ public class RpcTracingTests
 
         Assert.Contains(records, x => IsProxyTrace(x, RpcTraceOperation.EventAttach, "TestEvent", "==>"));
         Assert.Contains(records, x => IsProxyTrace(x, RpcTraceOperation.EventDetach, "TestEvent", "==>"));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.EventAttach, "TestEvent", "==>"));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.EventDetach, "TestEvent", "==>"));
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.EventAttach, "TestEvent", "==>"));
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.EventDetach, "TestEvent", "==>"));
     }
 
     [Fact(Timeout = 30000)]
@@ -142,7 +146,7 @@ public class RpcTracingTests
         var records = factory.Records;
 
         Assert.Contains(records, x =>
-            IsAdapterTrace(x, RpcTraceOperation.MethodCall, "MethodThrowAsync(System.Threading.CancellationToken)", "<==")
+            IsDispatchTrace(x, RpcTraceOperation.MethodCall, "MethodThrowAsync(System.Threading.CancellationToken)", "<==")
             && x.Message.EndsWith("FAILED")
             && x.Exception is not null);
 
@@ -152,10 +156,10 @@ public class RpcTracingTests
             && x.Exception is not null);
     }
 
-    // An adapter can be shared by several sessions, so it has no instance id of its own; the id the
-    // request is addressed to is what identifies the object in the log.
+    // An adapter can be shared by several sessions and has no instance id of its own, so the session
+    // is what names the object the request is addressed to.
     [Fact(Timeout = 30000)]
-    public async Task AdapterTrace_CarriesTheInstanceIdOfTheRequest()
+    public async Task DispatchTrace_CarriesTheInstanceIdOfTheRequest()
     {
         var factory = new CapturingLoggerFactory();
         Guid instanceId = Guid.Empty;
@@ -171,9 +175,9 @@ public class RpcTracingTests
 
         var records = factory.Records;
 
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "==>")
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "==>")
             && x.HasField("InstanceId", instanceId));
-        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.PropertySet, "Property1", "==>")
+        Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.PropertySet, "Property1", "==>")
             && x.HasField("InstanceId", instanceId));
     }
 
@@ -222,7 +226,7 @@ public class RpcTracingTests
             {
                 Assert.NotNull(service);
                 service.RaiseTestEvent();
-                Assert.True(raised.Wait(TimeSpan.FromSeconds(5)));
+                Assert.True(raised.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
             }
             finally
             {

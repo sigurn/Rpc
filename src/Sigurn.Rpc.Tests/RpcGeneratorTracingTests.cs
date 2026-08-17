@@ -82,7 +82,7 @@ namespace MyCode
     }
 
     [Fact]
-    public void GeneratedCode_DeclaresFullInterfaceName()
+    public void GeneratedProxy_DeclaresFullInterfaceName()
     {
         var (generated, _) = Generate();
 
@@ -104,23 +104,44 @@ namespace MyCode
     }
 
     [Fact]
-    public void GeneratedCode_TracesEveryOperationKind_BehindALevelGuard()
+    public void GeneratedProxy_TracesEveryOperationKind_BehindALevelGuard()
     {
-        var (generated, _) = Generate();
+        var (_, proxy) = GenerateParts();
 
-        Assert.Contains("if (IsTraceEnabled) TraceEnter(RpcTraceOp.MethodCall, @__method_1, 1);", generated);
-        Assert.Contains("if (IsTraceEnabled) TraceExit(RpcTraceOp.MethodCall, @__method_1, 1);", generated);
-        Assert.Contains("catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOp.MethodCall, @__method_1, 1))", generated);
+        Assert.Contains("if (IsTraceEnabled) TraceEnter(RpcTraceOp.MethodCall, @__method_1, 1);", proxy);
+        Assert.Contains("if (IsTraceEnabled) TraceExit(RpcTraceOp.MethodCall, @__method_1, 1);", proxy);
+        Assert.Contains("catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOp.MethodCall, @__method_1, 1))", proxy);
 
-        Assert.Contains("TraceEnter(RpcTraceOp.PropertyGet, @__property_0, 0);", generated);
-        Assert.Contains("TraceEnter(RpcTraceOp.PropertySet, @__property_0, 0);", generated);
-        Assert.Contains("TraceEnter(RpcTraceOp.EventAttach, @__event_0, 0);", generated);
-        Assert.Contains("TraceEnter(RpcTraceOp.EventDetach, @__event_0, 0);", generated);
-        Assert.Contains("TraceEnter(RpcTraceOp.EventRaise, @__event_0, 0);", generated);
+        Assert.Contains("TraceEnter(RpcTraceOp.PropertyGet, @__property_0, 0);", proxy);
+        Assert.Contains("TraceEnter(RpcTraceOp.PropertySet, @__property_0, 0);", proxy);
+        Assert.Contains("TraceEnter(RpcTraceOp.EventAttach, @__event_0, 0);", proxy);
+        Assert.Contains("TraceEnter(RpcTraceOp.EventDetach, @__event_0, 0);", proxy);
+        Assert.Contains("TraceEnter(RpcTraceOp.EventRaise, @__event_0, 0);", proxy);
     }
 
+    // The adapter owns neither the instance id nor the request, so it does not log. It only answers
+    // what a member is called, and the session writes the line.
     [Fact]
-    public void GeneratedCode_TracesOnBothTheAdapterAndTheProxy()
+    public void GeneratedAdapter_DoesNotTrace_AndOnlyResolvesMemberNames()
+    {
+        var (adapter, _) = GenerateParts();
+
+        Assert.DoesNotContain("TraceEnter", adapter);
+        Assert.DoesNotContain("TraceExit", adapter);
+        Assert.DoesNotContain("TraceFailure", adapter);
+        Assert.DoesNotContain("IsTraceEnabled", adapter);
+        Assert.DoesNotContain("RpcInterfaceName", adapter);
+
+        Assert.Contains("protected override string? GetMemberName(RpcTraceOp operation, int memberId)", adapter);
+        Assert.Contains("case RpcTraceOp.MethodCall:", adapter);
+        Assert.Contains("case RpcTraceOp.PropertyGet:", adapter);
+        Assert.Contains("case RpcTraceOp.PropertySet:", adapter);
+        Assert.Contains("case RpcTraceOp.EventAttach:", adapter);
+        Assert.Contains("case RpcTraceOp.EventDetach:", adapter);
+        Assert.Contains("case RpcTraceOp.EventRaise:", adapter);
+    }
+
+    private static (string Adapter, string Proxy) GenerateParts()
     {
         var (generated, _) = Generate();
 
@@ -129,12 +150,6 @@ namespace MyCode
 
         Assert.True(adapterStart >= 0 && proxyStart > adapterStart);
 
-        var adapter = generated[adapterStart..proxyStart];
-        var proxy = generated[proxyStart..];
-
-        Assert.Contains("TraceEnter(RpcTraceOp.MethodCall", adapter);
-        Assert.Contains("TraceEnter(RpcTraceOp.MethodCall", proxy);
-        Assert.Contains("protected override string RpcInterfaceName", adapter);
-        Assert.Contains("protected override string RpcInterfaceName", proxy);
+        return (generated[adapterStart..proxyStart], generated[proxyStart..]);
     }
 }

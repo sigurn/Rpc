@@ -113,6 +113,10 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
         return adapter;
     }
 
+    private static int _adapterCounter;
+
+    private readonly int _adapterId = Interlocked.Increment(ref _adapterCounter);
+
     private volatile int _isDisposed = 0;
     private bool _ownsInstance = true;
     private IDisposable? _disposable = null;
@@ -130,11 +134,30 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     {
         InterfaceType = interfaceType;
         _instance = instance;
+
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Service instance created: #{AdapterId} interface={Interface} type={InstanceType}",
+                _adapterId, InterfaceType.FullName, InstanceType.FullName);
+    }
+
+    // Ties one object to the several instance ids it is exposed under: a shared (Host/Process)
+    // adapter is registered in every session that asks for it, each time under a new id.
+    internal int AdapterId => _adapterId;
+
+    // Logged before the instance is disposed rather than after, so the line is written exactly once
+    // and survives a service whose own disposal throws.
+    private void TraceDisposal()
+    {
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Service instance disposed: #{AdapterId} interface={Interface} type={InstanceType} owned={Owned}",
+                _adapterId, InterfaceType.FullName, InstanceType.FullName, _ownsInstance);
     }
 
     void IDisposable.Dispose()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        TraceDisposal();
 
         Dispose(true);
 
@@ -156,6 +179,8 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     async ValueTask IAsyncDisposable.DisposeAsync()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+
+        TraceDisposal();
 
         Dispose(true);
 
@@ -204,55 +229,10 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     internal Type InstanceType => _instance.GetType();
 
     /// <summary>
-    /// Full name of the remote interface, used in trace messages. Generated adapters override it
-    /// with a compile time constant.
+    /// Name of an interface member, used by the session when it logs a dispatch. Generated adapters
+    /// override it with their compile time constants; the base class does not know the names.
     /// </summary>
-    protected virtual string RpcInterfaceName => InterfaceType.FullName ?? InterfaceType.Name;
-
-    /// <summary>
-    /// True when trace logging is on. Call sites check it before building trace arguments so that
-    /// nothing is computed when the level is off.
-    /// </summary>
-    protected static bool IsTraceEnabled => _logger.IsEnabled(LogLevel.Trace);
-
-    /// <summary>
-    /// Maps an event id to its name, for log lines raised outside a dispatch (an event fanned out to
-    /// the subscribed sessions). Generated adapters override it; the base class has no way to know
-    /// the names and returns <c>null</c>.
-    /// </summary>
-    protected internal virtual string? GetEventName(int eventId) => null;
-
-    /// <summary>Traces the start of a dispatched member access.</summary>
-    protected void TraceEnter(RpcTraceOperation operation, string member, int memberId)
-    {
-        if (!_logger.IsEnabled(LogLevel.Trace)) return;
-
-        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
-            operation, RpcInterfaceName, member, memberId, RpcDispatchContext.InstanceId);
-    }
-
-    /// <summary>Traces the end of a dispatched member access.</summary>
-    protected void TraceExit(RpcTraceOperation operation, string member, int memberId)
-    {
-        if (!_logger.IsEnabled(LogLevel.Trace)) return;
-
-        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
-            operation, RpcInterfaceName, member, memberId, RpcDispatchContext.InstanceId);
-    }
-
-    /// <summary>
-    /// Traces a failed member dispatch and always returns false, so it can be used as an exception
-    /// filter (<c>catch (Exception ex) when (TraceFailure(ex, ...))</c>). The filter runs during the
-    /// first pass, which logs the failure without catching it or unwinding the stack.
-    /// </summary>
-    protected bool TraceFailure(Exception exception, RpcTraceOperation operation, string member, int memberId)
-    {
-        if (_logger.IsEnabled(LogLevel.Trace))
-            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} FAILED",
-                operation, RpcInterfaceName, member, memberId, RpcDispatchContext.InstanceId);
-
-        return false;
-    }
+    protected internal virtual string? GetMemberName(RpcTraceOperation operation, int memberId) => null;
 
     protected SerializationContext Context
     {

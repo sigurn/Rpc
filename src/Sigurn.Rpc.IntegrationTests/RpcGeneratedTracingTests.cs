@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Sigurn.Rpc.IntegrationTests;
 
 /// <summary>
-/// Exercises the tracing the source generator emits. This project consumes the packaged library, so
-/// the adapter and proxy under test are the real generated ones.
+/// Exercises tracing over generated code: this project consumes the packaged library, so the adapter
+/// and proxy under test are the real generated ones.
 /// </summary>
 public class RpcGeneratedTracingTests
 {
@@ -67,15 +67,22 @@ public class RpcGeneratedTracingTests
         => record.State.TryGetValue(field, out var actual)
             && string.Equals(actual?.ToString(), value, StringComparison.Ordinal);
 
-    private static bool IsTrace(Record record, string operation, string member, string prefix)
-        => record.Level == LogLevel.Trace
+    private static bool IsTrace(Record record, string category, string operation, string member, string prefix)
+        => record.Category == category
+            && record.Level == LogLevel.Trace
             && record.Message.StartsWith(prefix)
             && Has(record, "Operation", operation)
             && Has(record, "Interface", "Sigurn.Rpc.IntegrationTests.ITestService")
             && Has(record, "Member", member);
 
+    // The proxy owns its instance id and traces itself; on the server the session traces, because the
+    // generated adapter owns neither the id nor the request.
+    private const string ProxyCategory = "Sigurn.Rpc.Infrastructure.InterfaceProxy";
+    private const string AdapterCategory = "Sigurn.Rpc.Infrastructure.InterfaceAdapter";
+    private const string SessionCategory = "Sigurn.Rpc.Session";
+
     [Fact]
-    public async Task GeneratedProxyAndAdapter_TraceMembersByName()
+    public async Task GeneratedCode_IsTracedByMemberName_OnBothSides()
     {
         var factory = new CapturingFactory();
         RpcLogging.Configure(factory);
@@ -114,19 +121,19 @@ public class RpcGeneratedTracingTests
             var records = factory.Records;
 
             // Method4 is id 3 in declaration order; the trace must name it, not just the id.
-            Assert.Contains(records, x => IsTrace(x, "MethodCall",
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "MethodCall",
                 "Method4(string, string, System.Threading.CancellationToken)", "==>"));
-            Assert.Contains(records, x => IsTrace(x, "MethodCall",
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "MethodCall",
                 "Method4(string, string, System.Threading.CancellationToken)", "<=="));
 
-            Assert.Contains(records, x => IsTrace(x, "PropertySet", "Prop1", "==>"));
-            Assert.Contains(records, x => IsTrace(x, "PropertyGet", "Prop1", "==>"));
-            Assert.Contains(records, x => IsTrace(x, "EventAttach", "Event1", "==>"));
-            Assert.Contains(records, x => IsTrace(x, "EventDetach", "Event1", "==>"));
-            Assert.Contains(records, x => IsTrace(x, "EventRaise", "Event1", "==>"));
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "PropertySet", "Prop1", "==>"));
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "PropertyGet", "Prop1", "==>"));
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "EventAttach", "Event1", "==>"));
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "EventDetach", "Event1", "==>"));
+            Assert.Contains(records, x => IsTrace(x, ProxyCategory, "EventRaise", "Event1", "==>"));
 
-            // The adapter has no instance id of its own; it comes from the request being dispatched.
-            Assert.Contains(records, x => IsTrace(x, "MethodCall",
+            // The id comes from the request the session is dispatching.
+            Assert.Contains(records, x => IsTrace(x, SessionCategory, "MethodCall",
                 "Method4(string, string, System.Threading.CancellationToken)", "==>")
                 && Has(x, "InstanceId", instanceId.ToString()));
 
@@ -135,6 +142,9 @@ public class RpcGeneratedTracingTests
                 && Has(x, "InstanceId", instanceId.ToString())
                 && Has(x, "Interface", "Sigurn.Rpc.IntegrationTests.ITestService")
                 && Has(x, "Member", "Event1"));
+
+            // The generated adapter does no logging at all.
+            Assert.DoesNotContain(records, x => x.Category == AdapterCategory && x.Level == LogLevel.Trace);
 
             // Instance lifecycle must be identifiable too.
             Assert.Contains(records, x => x.Level == LogLevel.Information
