@@ -19,9 +19,7 @@ global using System.Collections.Generic;
 global using System.Threading.Tasks;
 
 using Sigurn.Rpc;
-using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
 using System;
 
 namespace MyCode
@@ -42,7 +40,11 @@ namespace MyCode
 }
 """;
 
-    private static (string Generated, IReadOnlyList<Diagnostic> Diagnostics) Generate()
+    private static (string Generated, IReadOnlyList<Diagnostic> Diagnostics) Generate() => Generate(Source);
+
+    // Diagnostics are everything the generated code produces, warnings included: a warning in code
+    // the user did not write is noise they cannot fix.
+    private static (string Generated, IReadOnlyList<Diagnostic> Diagnostics) Generate(string source)
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
 
@@ -56,7 +58,7 @@ namespace MyCode
 
         var compilation = CSharpCompilation.Create(
             "tracing-compilation",
-            [CSharpSyntaxTree.ParseText(Source, parseOptions)],
+            [CSharpSyntaxTree.ParseText(source, parseOptions)],
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
                 .WithNullableContextOptions(NullableContextOptions.Enable));
@@ -71,13 +73,40 @@ namespace MyCode
             .Single()
             .SourceText.ToString();
 
-        return (generated, [.. output.GetDiagnostics().Where(x => x.Severity == DiagnosticSeverity.Error)]);
+        return (generated, [.. output.GetDiagnostics()
+            .Where(x => x.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)]);
     }
 
     [Fact]
     public void GeneratedCode_Compiles()
     {
         var (_, diagnostics) = Generate();
+        Assert.Empty(diagnostics);
+    }
+
+    // An interface can carry no members of its own - a marker, or one that only extends another.
+    // The generated code must still be clean.
+    [Fact]
+    public void GeneratedCode_ForAnInterfaceWithoutMembers_IsWarningFree()
+    {
+        var (_, diagnostics) = Generate("""
+#nullable enable
+
+global using System.Collections.Generic;
+global using System.Threading.Tasks;
+
+using Sigurn.Rpc;
+using System;
+
+namespace MyCode
+{
+    [RemoteInterface()]
+    public interface IMarker
+    {
+    }
+}
+""");
+
         Assert.Empty(diagnostics);
     }
 

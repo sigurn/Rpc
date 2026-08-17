@@ -157,9 +157,9 @@ public class RpcTracingTests
     }
 
     // An adapter can be shared by several sessions and has no instance id of its own, so the session
-    // is what names the object the request is addressed to.
+    // is what names the object the request is addressed to - and which connection it came over.
     [Fact(Timeout = 30000)]
-    public async Task DispatchTrace_CarriesTheInstanceIdOfTheRequest()
+    public async Task DispatchTrace_IdentifiesTheInstanceAndTheSession()
     {
         var factory = new CapturingLoggerFactory();
         Guid instanceId = Guid.Empty;
@@ -179,6 +179,19 @@ public class RpcTracingTests
             && x.HasField("InstanceId", instanceId));
         Assert.Contains(records, x => IsDispatchTrace(x, RpcTraceOperation.PropertySet, "Property1", "==>")
             && x.HasField("InstanceId", instanceId));
+
+        // Every dispatch of this connection reports the same session, so the log can be split per
+        // client. Only the server side is dispatch: the client session logs the same instance id from
+        // its own session when it creates the proxy.
+        var dispatches = records
+            .Where(x => x.Category == typeof(Session).FullName
+                && (x.Message.StartsWith("==>") || x.Message.StartsWith("<==")))
+            .ToList();
+
+        Assert.NotEmpty(dispatches);
+        Assert.All(dispatches, x => Assert.IsType<Guid>(x.Field("SessionId")));
+        Assert.Single(dispatches.Select(x => x.Field("SessionId")).Distinct());
+        Assert.DoesNotContain(dispatches, x => Equals(x.Field("SessionId"), Guid.Empty));
     }
 
     // The adapter fans an event out to every subscribed session, so the instance id belongs to the
@@ -239,12 +252,15 @@ public class RpcTracingTests
             host.Close();
         }
 
+        // Same field names and same tail as a dispatch line, so both can be queried together.
         Assert.Contains(factory.Records, x =>
             x.Category == typeof(Session).FullName
             && x.Message.Contains("Sending event")
             && x.HasField("InstanceId", instanceId)
             && x.HasField("Interface", InterfaceName)
-            && x.HasField("Member", "TestEvent"));
+            && x.HasField("Member", "TestEvent")
+            && x.Field("MemberId") is not null
+            && x.Field("SessionId") is Guid);
     }
 
     [Fact(Timeout = 30000)]

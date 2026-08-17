@@ -424,8 +424,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             }
 
             if (_logger.IsEnabled(LogLevel.Trace))
-                _logger.LogTrace("Sending event {Interface}.{Member} [id={EventId}] for instance {InstanceId}",
-                    GetInterfaceName(s), GetMemberName(s, RpcTraceOperation.EventRaise, e.EventId), e.EventId, id);
+                _logger.LogTrace("Sending event {Interface}.{Member} [id={MemberId}] instance={InstanceId} session={SessionId}",
+                    GetInterfaceName(s), GetMemberName(s, RpcTraceOperation.EventRaise, e.EventId), e.EventId, id, Id);
 
             var packet = new EventDataPacket(id, e.EventId, e.Args);
 
@@ -439,8 +439,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             catch (Exception ex)
             {
                 if (_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug(ex, "Dropped event {Interface}.{Member} [id={EventId}] for instance {InstanceId}: channel unavailable",
-                        GetInterfaceName(s), GetMemberName(s, RpcTraceOperation.EventRaise, e.EventId), e.EventId, id);
+                    _logger.LogDebug(ex, "Dropped event {Interface}.{Member} [id={MemberId}] instance={InstanceId} session={SessionId}: channel unavailable",
+                        GetInterfaceName(s), GetMemberName(s, RpcTraceOperation.EventRaise, e.EventId), e.EventId, id, Id);
             }
         };
 
@@ -456,8 +456,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
         }
 
         if (_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Instance registered: {InstanceId} adapter=#{AdapterId} interface={Interface} type={InstanceType}",
-                id, GetAdapterId(instance.Value), GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
+            _logger.LogInformation("Instance registered: {InstanceId} session={SessionId} adapter=#{AdapterId} interface={Interface} type={InstanceType}",
+                id, Id, GetAdapterId(instance.Value), GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
 
         if (instance.Value is ISessionsAware sas)
             sas.AttachSession(this);
@@ -589,12 +589,12 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             // Read the names before the reference is released — after that the adapter is gone.
             try
             {
-                _logger.LogInformation("Instance released: {InstanceId} adapter=#{AdapterId} interface={Interface} type={InstanceType}",
-                    instanceId, GetAdapterId(instance.Value), GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
+                _logger.LogInformation("Instance released: {InstanceId} session={SessionId} adapter=#{AdapterId} interface={Interface} type={InstanceType}",
+                    instanceId, Id, GetAdapterId(instance.Value), GetInterfaceName(instance.Value), GetInstanceTypeName(instance.Value));
             }
             catch (ObjectDisposedException)
             {
-                _logger.LogInformation("Instance released: {InstanceId}", instanceId);
+                _logger.LogInformation("Instance released: {InstanceId} session={SessionId}", instanceId, Id);
             }
         }
 
@@ -627,8 +627,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                         _restorableInstances[instanceId] = serviceInstance;
 
                 if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Proxy created: {InstanceId} interface={Interface}",
-                        instanceId, type.FullName ?? type.Name);
+                    _logger.LogInformation("Proxy created: {InstanceId} session={SessionId} interface={Interface}",
+                        instanceId, Id, type.FullName ?? type.Name);
             }
 
             return InterfaceProxy.CreateProxy(instanceId, type, proxyRef, SerializationContext);
@@ -741,8 +741,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             memberId,
             instanceId);
 
-        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
-            trace.Operation, trace.Interface, trace.Member, trace.MemberId, trace.InstanceId);
+        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} session={SessionId}",
+            trace.Operation, trace.Interface, trace.Member, trace.MemberId, trace.InstanceId, Id);
 
         return trace;
     }
@@ -751,8 +751,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     {
         if (trace is not { } t) return;
 
-        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
-            t.Operation, t.Interface, t.Member, t.MemberId, t.InstanceId);
+        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} session={SessionId}",
+            t.Operation, t.Interface, t.Member, t.MemberId, t.InstanceId, Id);
     }
 
     // Always false: used as an exception filter, so the failure is logged during the first pass
@@ -760,8 +760,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     private bool TraceFailure(DispatchTrace? trace, Exception exception)
     {
         if (trace is { } t)
-            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} FAILED",
-                t.Operation, t.Interface, t.Member, t.MemberId, t.InstanceId);
+            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} session={SessionId} FAILED",
+                t.Operation, t.Interface, t.Member, t.MemberId, t.InstanceId, Id);
 
         return false;
     }

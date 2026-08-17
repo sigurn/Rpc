@@ -61,6 +61,7 @@ public class RpcInstanceLifecycleLoggingTests
             {
                 Assert.True(x.HasField("Interface", InterfaceName), $"Interface field was '{x.Field("Interface")}'");
                 Assert.True(x.HasField("InstanceType", ServiceTypeName), $"InstanceType field was '{x.Field("InstanceType")}'");
+                Assert.IsType<Guid>(x.Field("SessionId"));
             });
 
             // Client side proxy creation.
@@ -90,6 +91,7 @@ public class RpcInstanceLifecycleLoggingTests
         {
             Assert.True(x.HasField("Interface", InterfaceName), $"Interface field was '{x.Field("Interface")}'");
             Assert.True(x.HasField("InstanceType", ServiceTypeName), $"InstanceType field was '{x.Field("InstanceType")}'");
+            Assert.IsType<Guid>(x.Field("SessionId"));
         });
 
         // Client side proxy release.

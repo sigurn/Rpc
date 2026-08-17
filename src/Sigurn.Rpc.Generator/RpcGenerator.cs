@@ -122,6 +122,11 @@ namespace Sigurn.Rpc.Generator
         {
             var sb = new StringBuilder();
 
+            // A marker interface, or one that only extends another, has nothing to name: emitting the
+            // override would leave an empty switch block (CS1522). The base already returns null.
+            if (riti.Properties.Count == 0 && riti.Methods.Count == 0 && riti.Events.Count == 0)
+                return sb;
+
             sb.Append("    protected override string? GetMemberName(RpcTraceOp operation, int memberId)\n");
             sb.Append("    {\n");
             sb.Append("        switch (operation)\n");
