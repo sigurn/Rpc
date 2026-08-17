@@ -119,6 +119,42 @@ namespace Sigurn.Rpc.Generator
             return sb;
         }
 
+        // An event fanned out to the subscribed sessions is logged outside any dispatch, so the
+        // session resolves the name through the adapter instead of a trace call site.
+        private static StringBuilder GetEventNameLookup(RemoteInterfaceTypeInfo riti)
+        {
+            var sb = new StringBuilder();
+
+            if (riti.Events.Count == 0)
+                return sb;
+
+            sb.Append("    protected override string? GetEventName(int eventId)\n");
+            sb.Append("    {\n");
+
+            bool first = true;
+            foreach (var e in riti.Events)
+            {
+                sb.Append($"        {(first ? "if" : "else if")} (eventId == {e.Id}) return @__event_{e.Id};\n");
+                first = false;
+            }
+
+            sb.Append("\n");
+            sb.Append("        return null;\n");
+            sb.Append("    }\n");
+            sb.Append("\n");
+
+            return sb;
+        }
+
+        // A method with ref/out parameters is answered with the out args; without them there is
+        // nothing to assign back, so fail with a clear message instead of a null dereference.
+        private static void AppendOutArgsGuard(StringBuilder body)
+        {
+            body.Append("        if (@outArgs is null)\n");
+            body.Append("            throw new InvalidOperationException(\"Server did not return output arguments.\");\n");
+            body.Append("\n");
+        }
+
         /// <summary>
         /// Emits <paramref name="body"/> wrapped into entry/exit/failure tracing. The body is
         /// re-indented one level, so call sites keep building it at their own indentation.
@@ -174,6 +210,7 @@ namespace Sigurn.Rpc.Generator
             sb.Append("\n");
 
             sb.Append(GetTraceMetadata(fullTypeName, riti));
+            sb.Append(GetEventNameLookup(riti));
 
             var gsb = new StringBuilder();
             var ssb = new StringBuilder();
@@ -679,9 +716,16 @@ namespace Sigurn.Rpc.Generator
 
                         if (outArgs)
                         {
+                            AppendOutArgsGuard(pbody);
+
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
-                                pbody.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}]);\n");
+                            {
+                                pbody.Append($"        {oa.Name} = FromBytes<{oa.Symbol.Type}>(@outArgs[{an++}])");
+                                if (oa.Symbol.Type.IsReferenceType && oa.Symbol.NullableAnnotation == NullableAnnotation.NotAnnotated)
+                                    pbody.Append($" ?? throw new InvalidOperationException(\"Output value for argument '{oa.Symbol.Name}' cannot be null.\")");
+                                pbody.Append(";\n");
+                            }
                         }
                     }
                     else if (m.Symbol.ReturnType.ToString() == _taskName)
@@ -693,6 +737,8 @@ namespace Sigurn.Rpc.Generator
 
                         if (outArgs)
                         {
+                            AppendOutArgsGuard(pbody);
+
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
                             {
@@ -719,6 +765,8 @@ namespace Sigurn.Rpc.Generator
                         pbody.Append("\n");
                         if (outArgs)
                         {
+                            AppendOutArgsGuard(pbody);
+
                             var an = 0;
                             foreach (var oa in m.Args.Where(x => x.Modifiers.Contains("ref") || x.Modifiers.Contains("out")))
                             {

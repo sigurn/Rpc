@@ -120,6 +120,13 @@ class TestServiceAdapter : InterfaceAdapter
         _instance = instance;
     }
 
+    protected internal override string? GetEventName(int eventId)
+    {
+        if (eventId == 1) return @__event_1;
+
+        return null;
+    }
+
     public override async Task<(byte[]? Result, IReadOnlyList<byte[]>? Args)> InvokeMethodAsync(int methodId, IReadOnlyList<byte[]>? args, bool oneWay, CancellationToken cancellationToken)
     {
         if (methodId == 1)

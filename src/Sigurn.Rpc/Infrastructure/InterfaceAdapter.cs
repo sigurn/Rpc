@@ -215,13 +215,20 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     /// </summary>
     protected static bool IsTraceEnabled => _logger.IsEnabled(LogLevel.Trace);
 
+    /// <summary>
+    /// Maps an event id to its name, for log lines raised outside a dispatch (an event fanned out to
+    /// the subscribed sessions). Generated adapters override it; the base class has no way to know
+    /// the names and returns <c>null</c>.
+    /// </summary>
+    protected internal virtual string? GetEventName(int eventId) => null;
+
     /// <summary>Traces the start of a dispatched member access.</summary>
     protected void TraceEnter(RpcTraceOperation operation, string member, int memberId)
     {
         if (!_logger.IsEnabled(LogLevel.Trace)) return;
 
-        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] session={SessionId}",
-            operation, RpcInterfaceName, member, memberId, Session.Current?.Id);
+        _logger.LogTrace("==> {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
+            operation, RpcInterfaceName, member, memberId, RpcDispatchContext.InstanceId);
     }
 
     /// <summary>Traces the end of a dispatched member access.</summary>
@@ -229,8 +236,8 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     {
         if (!_logger.IsEnabled(LogLevel.Trace)) return;
 
-        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] session={SessionId}",
-            operation, RpcInterfaceName, member, memberId, Session.Current?.Id);
+        _logger.LogTrace("<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId}",
+            operation, RpcInterfaceName, member, memberId, RpcDispatchContext.InstanceId);
     }
 
     /// <summary>
@@ -241,8 +248,8 @@ public abstract class InterfaceAdapter : ICallTarget, IDisposable, IAsyncDisposa
     protected bool TraceFailure(Exception exception, RpcTraceOperation operation, string member, int memberId)
     {
         if (_logger.IsEnabled(LogLevel.Trace))
-            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] session={SessionId} FAILED",
-                operation, RpcInterfaceName, member, memberId, Session.Current?.Id);
+            _logger.LogTrace(exception, "<== {Operation} {Interface}.{Member} [id={MemberId}] instance={InstanceId} FAILED",
+                operation, RpcInterfaceName, member, memberId, RpcDispatchContext.InstanceId);
 
         return false;
     }

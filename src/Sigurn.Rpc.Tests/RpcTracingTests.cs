@@ -152,6 +152,97 @@ public class RpcTracingTests
             && x.Exception is not null);
     }
 
+    // An adapter can be shared by several sessions, so it has no instance id of its own; the id the
+    // request is addressed to is what identifies the object in the log.
+    [Fact(Timeout = 30000)]
+    public async Task AdapterTrace_CarriesTheInstanceIdOfTheRequest()
+    {
+        var factory = new CapturingLoggerFactory();
+        Guid instanceId = Guid.Empty;
+
+        await WithTracedClientAsync(factory, service =>
+        {
+            instanceId = Assert.IsAssignableFrom<InterfaceProxy>(service).InstanceId;
+
+            Assert.Equal(5, service.Add(2, 3));
+            service.Property1 = 7;
+            return Task.CompletedTask;
+        });
+
+        var records = factory.Records;
+
+        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.MethodCall, "Add(int, int)", "==>")
+            && x.HasField("InstanceId", instanceId));
+        Assert.Contains(records, x => IsAdapterTrace(x, RpcTraceOperation.PropertySet, "Property1", "==>")
+            && x.HasField("InstanceId", instanceId));
+    }
+
+    // The adapter fans an event out to every subscribed session, so the instance id belongs to the
+    // per-session send. That line must name the event too, or the pair is unreadable.
+    [Fact(Timeout = 30000)]
+    public async Task EventSend_IsLogged_WithInstanceIdAndEventName()
+    {
+        var factory = new CapturingLoggerFactory();
+        using var scope = new RpcLoggingScope(factory);
+
+        var log = new List<string>();
+        TestService? service = null;
+
+        using TcpHost host = new TcpHost();
+        host.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+        ServiceHost serviceHost = new ServiceHost(host);
+        serviceHost.RegisterSerive<ITestService>(ShareWithin.None, () => service = new TestService(log));
+        serviceHost.Start();
+
+        using CancellationTokenSource cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+        using RpcClient client = new RpcClient(async cancellationToken =>
+        {
+            var channel = new TcpChannel(host.EndPoint);
+            await channel.OpenAsync(cancellationToken);
+            return channel;
+        });
+
+        client.AutoReopen = false;
+        await client.OpenAsync(cts.Token);
+
+        Guid instanceId;
+        try
+        {
+            var proxy = await client.GetService<ITestService>(cts.Token);
+            Assert.NotNull(proxy);
+            instanceId = Assert.IsAssignableFrom<InterfaceProxy>(proxy).InstanceId;
+
+            using var raised = new ManualResetEventSlim(false);
+            void Handler(object? sender, EventArgs e) => raised.Set();
+
+            proxy.TestEvent += Handler;
+            try
+            {
+                Assert.NotNull(service);
+                service.RaiseTestEvent();
+                Assert.True(raised.Wait(TimeSpan.FromSeconds(5)));
+            }
+            finally
+            {
+                proxy.TestEvent -= Handler;
+            }
+        }
+        finally
+        {
+            await client.CloseAsync(CancellationToken.None);
+            host.Close();
+        }
+
+        Assert.Contains(factory.Records, x =>
+            x.Category == typeof(Session).FullName
+            && x.Message.Contains("Sending event")
+            && x.HasField("InstanceId", instanceId)
+            && x.HasField("Interface", InterfaceName)
+            && x.HasField("Member", "TestEvent"));
+    }
+
     [Fact(Timeout = 30000)]
     public async Task NothingIsTraced_WhenTraceLevelIsDisabled()
     {

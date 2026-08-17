@@ -98,6 +98,7 @@ public class RpcGeneratedTracingTests
             await client.OpenAsync(CancellationToken.None);
 
             var service = await client.GetService<ITestService>(CancellationToken.None);
+            var instanceId = Assert.IsAssignableFrom<Sigurn.Rpc.Infrastructure.InterfaceProxy>(service).InstanceId;
 
             using ManualResetEvent eventTriggered = new ManualResetEvent(false);
             void Handler(object? sender, EventArgs e) => eventTriggered.Set();
@@ -123,6 +124,17 @@ public class RpcGeneratedTracingTests
             Assert.Contains(records, x => IsTrace(x, "EventAttach", "Event1", "==>"));
             Assert.Contains(records, x => IsTrace(x, "EventDetach", "Event1", "==>"));
             Assert.Contains(records, x => IsTrace(x, "EventRaise", "Event1", "==>"));
+
+            // The adapter has no instance id of its own; it comes from the request being dispatched.
+            Assert.Contains(records, x => IsTrace(x, "MethodCall",
+                "Method4(string, string, System.Threading.CancellationToken)", "==>")
+                && Has(x, "InstanceId", instanceId.ToString()));
+
+            // An event is fanned out to every subscribed session, so the id belongs to the send.
+            Assert.Contains(records, x => x.Message.Contains("Sending event")
+                && Has(x, "InstanceId", instanceId.ToString())
+                && Has(x, "Interface", "Sigurn.Rpc.IntegrationTests.ITestService")
+                && Has(x, "Member", "Event1"));
 
             // Instance lifecycle must be identifiable too.
             Assert.Contains(records, x => x.Level == LogLevel.Information

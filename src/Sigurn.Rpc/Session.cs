@@ -424,7 +424,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             }
 
             if (_logger.IsEnabled(LogLevel.Trace))
-                _logger.LogTrace("Sending event {EventId} for instance {InstanceId}", e.EventId, id);
+                _logger.LogTrace("Sending event {Interface}.{Member} [id={EventId}] for instance {InstanceId}",
+                    GetInterfaceName(s), GetEventName(s, e.EventId), e.EventId, id);
 
             var packet = new EventDataPacket(id, e.EventId, e.Args);
 
@@ -438,7 +439,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
             catch (Exception ex)
             {
                 if (_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug(ex, "Dropped event {EventId} for instance {InstanceId}: channel unavailable", e.EventId, id);
+                    _logger.LogDebug(ex, "Dropped event {Interface}.{Member} [id={EventId}] for instance {InstanceId}: channel unavailable",
+                        GetInterfaceName(s), GetEventName(s, e.EventId), e.EventId, id);
             }
         };
 
@@ -540,20 +542,27 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
     // An adapter always knows the interface it exposes and the object behind it; both are what makes
     // an instance id in the log identifiable. A target that is not an adapter (or one already torn
     // down) still gets a usable name instead of aborting the log call.
-    private static string GetInterfaceName(ICallTarget target)
+    private static string GetInterfaceName(object? target)
     {
         if (target is InterfaceAdapter adapter)
             return adapter.InterfaceType.FullName ?? adapter.InterfaceType.Name;
 
-        return target.GetType().FullName ?? target.GetType().Name;
+        return target?.GetType().FullName ?? target?.GetType().Name ?? "?";
     }
 
-    private static string GetInstanceTypeName(ICallTarget target)
+    private static string GetInstanceTypeName(object? target)
     {
         if (target is InterfaceAdapter adapter)
             return adapter.InstanceType.FullName ?? adapter.InstanceType.Name;
 
-        return target.GetType().FullName ?? target.GetType().Name;
+        return target?.GetType().FullName ?? target?.GetType().Name ?? "?";
+    }
+
+    // Only a generated adapter knows its event names; anything else falls back to the id.
+    private static string GetEventName(object? target, int eventId)
+    {
+        return (target as InterfaceAdapter)?.GetEventName(eventId)
+            ?? eventId.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     // Releasing an exposed instance disposes the wrapped object when the last reference goes, and the
@@ -725,6 +734,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(mcp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
+                    using var _instanceScope = RpcDispatchContext.Scope(mcp.InstanceId);
+
                     var (Result, Args) = await instance.InvokeMethodAsync(mcp.MethodId, mcp.Args, mcp.OneWay, cancellationToken).ConfigureAwait(false);
                     return new MethodResultPacket(mcp)
                     {
@@ -737,6 +748,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(gpp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
+                    using var _instanceScope = RpcDispatchContext.Scope(gpp.InstanceId);
+
                     var value = await instance.GetPropertyValueAsync(gpp.PropertyId, cancellationToken).ConfigureAwait(false);
                     return new PropertyValuePacket(gpp)
                     {
@@ -748,6 +761,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(spp.InstanceId) ??
                         throw new Exception("Unknown instance");
 
+                    using var _instanceScope = RpcDispatchContext.Scope(spp.InstanceId);
+
                     await instance.SetPropertyValueAsync(spp.PropertyId, spp.Value, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(spp);
                 }
@@ -755,6 +770,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 {
                     var instance = GetAdapter(sfep.InstanceId) ??
                         throw new Exception("Unknown instance");
+
+                    using var _instanceScope = RpcDispatchContext.Scope(sfep.InstanceId);
 
                     await instance.AttachEventHandlerAsync(sfep.EventId, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(sfep);
@@ -764,6 +781,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                     var instance = GetAdapter(sfeps.InstanceId) ??
                         throw new Exception("Unknown instance");
 
+                    using var _instanceScope = RpcDispatchContext.Scope(sfeps.InstanceId);
+
                     await instance.AttachEventHandlersAsync(sfeps.EventIds, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(sfeps);
                 }
@@ -771,6 +790,8 @@ sealed class Session : ISession, IDisposable, IAsyncDisposable
                 {
                     var instance = GetAdapter(ufep.InstanceId) ??
                         throw new Exception("Unknown instance");
+
+                    using var _instanceScope = RpcDispatchContext.Scope(ufep.InstanceId);
 
                     await instance.DetachEventHandlerAsync(ufep.EventId, cancellationToken).ConfigureAwait(false);
                     return new SuccessPacket(ufep);

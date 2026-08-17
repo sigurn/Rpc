@@ -52,6 +52,14 @@ sealed class ITestService_Adapter : Sigurn.Rpc.Infrastructure.InterfaceAdapter
     private const string @__event_0 = "Event1";
     private const string @__event_1 = "Event2";
 
+    protected override string? GetEventName(int eventId)
+    {
+        if (eventId == 0) return @__event_0;
+        else if (eventId == 1) return @__event_1;
+
+        return null;
+    }
+
     public override async Task<byte[]?> GetPropertyValueAsync(int propertyId, CancellationToken cancellationToken)
     {
         CheckPermissions([ MyCode.Permission.Perm1 ]);
@@ -866,7 +874,10 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
         try
         {
             var (_, @outArgs) = InvokeMethod(4, [], false);
-            text = FromBytes<string>(@outArgs[0]);
+            if (@outArgs is null)
+                throw new InvalidOperationException("Server did not return output arguments.");
+
+            text = FromBytes<string>(@outArgs[0]) ?? throw new InvalidOperationException("Output value for argument 'text' cannot be null.");
         }
         catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOp.MethodCall, @__method_4, 4))
         {
@@ -889,7 +900,10 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
             ];
 
             var (_, @outArgs) = InvokeMethod(5, @args, false);
-            text = FromBytes<string>(@outArgs[0]);
+            if (@outArgs is null)
+                throw new InvalidOperationException("Server did not return output arguments.");
+
+            text = FromBytes<string>(@outArgs[0]) ?? throw new InvalidOperationException("Output value for argument 'text' cannot be null.");
         }
         catch (Exception @__ex) when (TraceFailure(@__ex, RpcTraceOp.MethodCall, @__method_5, 5))
         {
@@ -912,6 +926,9 @@ sealed class ITestService_Proxy : Sigurn.Rpc.Infrastructure.InterfaceProxy, MyCo
             ];
 
             var (@res, @outArgs) = InvokeMethod(6, @args, false);
+
+            if (@outArgs is null)
+                throw new InvalidOperationException("Server did not return output arguments.");
 
             n = FromBytes<int>(@outArgs[0]);
             outText = FromBytes<string[]>(@outArgs[1]) ?? throw new InvalidOperationException("Output value for argument 'outText' cannot be null.");
